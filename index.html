@@ -206,7 +206,7 @@ function demoApi() {
     einkaufAbschliessen: id => { E.find(e => e.id === id).abgeschlossen_am = new Date().toISOString(); return later(null); },
     einkaufErledigt: (id, ja) => { const e = E.find(x => x.id === id); e.erledigt_am = ja ? new Date().toISOString() : null; return later(e); },
     positionen: eid => later(P.filter(p => p.einkauf_id === eid)),
-    positionNeu: o => { const p = Object.assign({ id: ++nid, artikel_id: null, freitext: null, kategorie: null, menge_anpassung: 0, menge_fix: null, laden: null, aufnehmen: null, gekauft: false, nicht_erhaeltlich: false, in_aktion: false }, o); P.push(p); return later(p); },
+    positionNeu: o => { const p = Object.assign({ id: ++nid, artikel_id: null, freitext: null, kategorie: null, menge_anpassung: 0, menge_fix: null, laden: null, aufnehmen: null, gekauft: false, nicht_erhaeltlich: false, in_aktion: false, menge_gekauft: null }, o); P.push(p); return later(p); },
     positionAendern: (id, o) => { const p = P.find(x => x.id === id); Object.assign(p, o); return later(p); },
     positionLoeschen: id => { P = P.filter(x => x.id !== id); return later(null); },
     fruehereZusatz: () => later(P.filter(p => p.freitext).map(p => ({ freitext: p.freitext, kategorie: p.kategorie, laden: p.laden }))),
@@ -277,7 +277,7 @@ function render() {
   const root = $('#root');
   const y = window.scrollY;
   const admin = S.modus !== 'einkauf';
-  const tabs = admin ? [['liste', 'Liste planen'], ['einkaufen', 'Einkaufen'], ['artikel', 'Vorrat & Artikel']] : [];
+  const tabs = admin ? [['liste', 'Liste planen'], ['einkaufen', 'Einkaufen'], ['artikel', 'Vorrat']] : [];
   if (admin && !tabs.some(t => t[0] === S.tab)) S.tab = 'liste';
   root.innerHTML = `
     <header>
@@ -402,6 +402,9 @@ function hinweise(liste) {
 }
 
 /* ===== Ansicht für die einkaufende Person ===== */
+const gekauftAnders = i => i.p && i.p.menge_gekauft != null && i.p.menge_gekauft !== i.menge;
+const gekaufteMenge = i => (i.p && i.p.menge_gekauft != null) ? i.p.menge_gekauft : i.menge;
+
 function renderEinkaufen(main) {
   const { liste } = berechneListe();
   const reiter = [['alle', 'Gesamt'], ['Migros', 'Migros'], ['Denner', 'Denner']];
@@ -419,9 +422,10 @@ function renderEinkaufen(main) {
       const p = i.p || {}, key = i.a ? 'a' + i.a.id : 'p' + p.id;
       html += `<div class="row${p.gekauft ? ' done' : ''}${p.nicht_erhaeltlich ? ' na' : ''}" data-key="${key}">
         <input type="checkbox" class="check" data-act="gekauft" ${p.gekauft ? 'checked' : ''} aria-label="Gekauft">
-        <div class="main"><div class="name"><span class="menge">${fmt(i.menge)}×</span> ${esc(i.name)}</div>
-          <div class="meta">${esc(i.kategorie)}${p.in_aktion ? ' · <span class="tag">Aktion</span>' : ''}</div></div>
-        <button class="btn small ${p.nicht_erhaeltlich ? 'danger' : ''}" data-act="na">${p.nicht_erhaeltlich ? 'Nicht erhältlich ✓' : 'Nicht erhältlich'}</button>
+        <div class="main"><div class="name">${esc(i.name)}</div>
+          <div class="meta">${esc(i.kategorie)}${p.in_aktion ? ' · <span class="tag">Aktion</span>' : ''}${gekauftAnders(i) ? ` · <span class="tag warn">${fmt(p.menge_gekauft)} von ${fmt(i.menge)}</span>` : ''}</div>
+          <button class="btn small ${p.nicht_erhaeltlich ? 'danger' : ''}" data-act="na" style="margin-top:6px">${p.nicht_erhaeltlich ? 'Nicht erhältlich ✓' : 'Nicht erhältlich'}</button></div>
+        <div class="stepper" title="Gekaufte Menge"><button class="iconbtn" data-act="minus" aria-label="Weniger">−</button><span class="menge">${fmt(p.menge_gekauft ?? i.menge)}</span><button class="iconbtn" data-act="plus" aria-label="Mehr">+</button></div>
       </div>`;
     }
     html += `</div>`;
@@ -434,7 +438,10 @@ function renderEinkaufen(main) {
   const map = new Map(liste.map(i => [i.a ? 'a' + i.a.id : 'p' + i.p.id, i]));
   main.querySelectorAll('.row[data-key]').forEach(row => {
     const i = map.get(row.dataset.key); if (!i) return;
-    $('[data-act=gekauft]', row).onchange = e => setzePos(i, { gekauft: e.target.checked });
+    $('[data-act=gekauft]', row).onchange = e => setzePos(i, e.target.checked ? { gekauft: true } : { gekauft: false, menge_gekauft: null });
+    const ist = () => (i.p && i.p.menge_gekauft != null) ? i.p.menge_gekauft : i.menge;
+    $('[data-act=plus]', row).onclick = () => setzePos(i, { menge_gekauft: ist() + 1, gekauft: true });
+    $('[data-act=minus]', row).onclick = () => { const n = Math.max(0, ist() - 1); setzePos(i, { menge_gekauft: n, gekauft: n > 0 }); };
     $('[data-act=na]', row).onclick = () => setzePos(i, { nicht_erhaeltlich: !(i.p && i.p.nicht_erhaeltlich) });
   });
   $('#erledigt').onclick = async () => {
@@ -451,7 +458,7 @@ function listenZeile(i) {
     <input type="checkbox" class="check" data-act="gekauft" ${p.gekauft ? 'checked' : ''} aria-label="Gekauft">
     <div class="main">
       <div class="name">${esc(i.name)}</div>
-      <div class="meta">${esc(i.grund)}${i.a ? ' · ' + vorratText(i.a) : ''}${anders ? ' · <span class="tag">nur diese Woche</span>' : ''}${p.nicht_erhaeltlich ? ' · <span class="tag warn">nicht erhältlich</span>' : ''}</div>
+      <div class="meta">${esc(i.grund)}${i.a ? ' · ' + vorratText(i.a) : ''}${p.gekauft && gekauftAnders(i) ? ` · <span class="tag warn">gekauft ${fmt(p.menge_gekauft)} von ${fmt(i.menge)}</span>` : ''}${anders ? ' · <span class="tag">nur diese Woche</span>' : ''}${p.nicht_erhaeltlich ? ' · <span class="tag warn">nicht erhältlich</span>' : ''}</div>
       <div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">${ladenSelect(i.laden)}
         <button class="chip aktion" data-act="aktion" aria-pressed="${!!p.in_aktion}">${p.in_aktion ? 'In Aktion' : 'Aktion?'}</button></div>
     </div>
@@ -616,7 +623,7 @@ function abschliessenDialog() {
   $('#aOk', ov).onclick = async () => {
     $('#aOk', ov).disabled = true;
     try {
-      for (const i of bestandBuchung) await S.api.artikelAendern(i.a.id, { bestand: i.a.bestand + i.menge });
+      for (const i of bestandBuchung) await S.api.artikelAendern(i.a.id, { bestand: i.a.bestand + gekaufteMenge(i) });
       await S.api.einkaufAbschliessen(S.einkauf.id);
       ov.remove(); await laden(); toast('Einkauf abgeschlossen. Neue Liste gestartet.');
     } catch (e) { fehler(e); $('#aOk', ov).disabled = false; }
