@@ -113,17 +113,21 @@
 <body>
 <div id="root"><div class="loading">Lädt …</div></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
 <script>
 'use strict';
 /* =========================================================================
-   Einkauf & Vorrat – Version 1
-   Daten liegen in Supabase (Projekt einkaufs-app). Der Zugangsschlüssel
-   steht NICHT in dieser Datei (das GitHub-Projekt ist öffentlich), sondern
-   kommt einmalig aus dem Link hinter dem #-Zeichen und wird auf dem Gerät
-   gespeichert.
+   Einkauf & Vorrat
+   Daten liegen in Supabase (Projekt einkaufs-app). Zugriff nur mit Login
+   (E-Mail-Link). Die Datenbank prüft die Rolle selbst (Row Level Security):
+   admin = alles, einkauf = nur Liste abhaken / nicht erhältlich / erledigt,
+   wartend = nichts. Der Schlüssel unten ist öffentlich und gibt ohne Login
+   keinen Zugriff.
    ========================================================================= */
 const SUPABASE_URL = 'https://xfwxgviomkamxqsfhvow.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_tSxo17j-CvZGLeO67zkTuw_oV5Kz8-L';
 const KEY_STORE = 'einkauf-app-schluessel';
+let sb = null;
 const LAEDEN = ['Denner', 'Migros', 'Lidl', 'Coop', 'Türkengeschäft'];
 const OHNE_LADEN = 'Ohne Laden';
 const OHNE_KAT = 'Ohne Kategorie';
@@ -142,10 +146,11 @@ const store = {
 };
 
 /* ---------- Datenzugriff (Supabase REST) ---------- */
-function restApi(key) {
+function restApi(tokenHolen) {
   const base = SUPABASE_URL + '/rest/v1/';
   async function call(method, path, body, prefer) {
-    const headers = { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' };
+    const token = await tokenHolen();
+    const headers = { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
     if (prefer) headers.Prefer = prefer;
     const res = await fetch(base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     if (!res.ok) {
@@ -170,7 +175,10 @@ function restApi(key) {
     positionAendern: (id, obj) => call('PATCH', 'einkauf_position?id=eq.' + id, obj, 'return=representation').then(r => r[0]),
     positionLoeschen: id => call('DELETE', 'einkauf_position?id=eq.' + id),
     fruehereZusatz: () => call('GET', 'einkauf_position?select=freitext,kategorie,laden&freitext=not.is.null&order=id.desc&limit=300'),
-    pruefen: () => call('GET', 'artikel?select=id&limit=1'),
+    meinProfil: uid => call('GET', 'benutzer?select=*&id=eq.' + uid).then(r => r[0] || null),
+    benutzer: () => call('GET', 'benutzer?select=*&order=erstellt_am.asc'),
+    benutzerRolle: (id, rolle) => call('PATCH', 'benutzer?id=eq.' + id, { rolle }, 'return=representation').then(r => r[0]),
+    benutzerLoeschen: id => call('DELETE', 'benutzer?id=eq.' + id),
   };
 }
 
@@ -202,14 +210,17 @@ function demoApi() {
     positionAendern: (id, o) => { const p = P.find(x => x.id === id); Object.assign(p, o); return later(p); },
     positionLoeschen: id => { P = P.filter(x => x.id !== id); return later(null); },
     fruehereZusatz: () => later(P.filter(p => p.freitext).map(p => ({ freitext: p.freitext, kategorie: p.kategorie, laden: p.laden }))),
-    pruefen: () => later([]),
+    meinProfil: () => later({ id: 'demo', email: 'demo@example.ch', rolle: 'admin' }),
+    benutzer: () => later([{ id: 'demo', email: 'demo@example.ch', rolle: 'admin' }, { id: 'u2', email: 'einkauf@example.ch', rolle: 'wartend' }]),
+    benutzerRolle: (id, rolle) => later({ id, rolle }),
+    benutzerLoeschen: () => later(null),
   };
 }
 
 /* ---------- Zustand ---------- */
 const S = {
   api: null, artikel: [], einkauf: null, pos: [], frueher: [],
-  tab: 'liste', suche: '', filter: 'alle', laden: 'alle',
+  tab: 'liste', suche: '', filter: 'alle', laden: 'alle', ekLaden: 'alle',
 };
 const posFor = id => S.pos.find(p => p.artikel_id === id);
 const artById = id => S.artikel.find(a => a.id === id);
@@ -265,20 +276,24 @@ async function setzeArtikel(a, aenderung) {
 function render() {
   const root = $('#root');
   const y = window.scrollY;
-  if (S.modus === 'einkauf') { renderEinkauf(root); window.scrollTo(0, y); return; }
+  const admin = S.modus !== 'einkauf';
+  const tabs = admin ? [['liste', 'Liste planen'], ['einkaufen', 'Einkaufen'], ['artikel', 'Vorrat & Artikel']] : [];
+  if (admin && !tabs.some(t => t[0] === S.tab)) S.tab = 'liste';
   root.innerHTML = `
     <header>
-      <div class="bar"><h1>Einkauf & Vorrat</h1>
-        <button class="iconbtn" id="neuLaden" title="Neu laden" aria-label="Neu laden">↻</button></div>
-      <div class="tabs" role="tablist">
-        <button class="tab" role="tab" data-tab="liste" aria-selected="${S.tab === 'liste'}">Einkaufsliste</button>
-        <button class="tab" role="tab" data-tab="artikel" aria-selected="${S.tab === 'artikel'}">Vorrat & Artikel</button>
-      </div>
+      <div class="bar"><h1>${admin ? 'Einkauf & Vorrat' : 'Einkaufsliste'}</h1>
+        <button class="iconbtn" id="neuLaden" title="Neu laden" aria-label="Neu laden">↻</button>
+        <button class="iconbtn" id="menue" title="Menü" aria-label="Menü">☰</button></div>
+      ${admin ? `<div class="tabs" role="tablist">${tabs.map(([k, t]) => `<button class="tab" role="tab" data-tab="${k}" aria-selected="${S.tab === k}">${t}</button>`).join('')}</div>` : ''}
     </header>
     <main id="main"></main>`;
   root.querySelectorAll('.tab').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; window.scrollTo(0, 0); render(); });
   $('#neuLaden').onclick = () => laden();
-  if (S.tab === 'liste') renderListe($('#main')); else renderArtikel($('#main'));
+  $('#menue').onclick = menue;
+  const main = $('#main');
+  if (!admin || S.tab === 'einkaufen') renderEinkaufen(main);
+  else if (S.tab === 'liste') renderListe(main);
+  else renderArtikel(main);
   window.scrollTo(0, y);
 }
 
@@ -341,7 +356,6 @@ function renderListe(main) {
 
   html += `<div class="footer-actions">
       <button class="btn" id="exportListe">Liste als Text kopieren</button>
-      <button class="btn" id="linkEinkauf">Link für einkaufende Person</button>
       <button class="btn primary" id="abschliessen" ${liste.length ? '' : 'disabled'}>Einkauf abschliessen</button>
     </div>
     <p class="sum" style="margin-top:8px">${offen} von ${liste.length} noch offen. «Einkauf abschliessen» bucht gekaufte Vorratsartikel in den Bestand und startet die nächste Liste.</p>
@@ -353,7 +367,6 @@ function renderListe(main) {
     const a = artById(+b.dataset.aufnehmen), g = grund(a), p = posFor(a.id);
     setzePos({ a, p }, { aufnehmen: true, in_aktion: true, menge_fix: (p && p.menge_fix) || Math.max(1, g.menge) });
   });
-  $('#linkEinkauf').onclick = einkaufLinkDialog;
   const ab = $('#hAbschliessen'); if (ab) ab.onclick = abschliessenDialog;
   main.querySelectorAll('[data-zurueck]').forEach(b => b.onclick = () => {
     const a = artById(+b.dataset.zurueck); setzePos({ a, p: posFor(a.id) }, { aufnehmen: a.nur_aktion ? true : null });
@@ -388,28 +401,15 @@ function hinweise(liste) {
   return h;
 }
 
-function einkaufLinkDialog() {
-  const k = store.get(KEY_STORE) || '';
-  const link = location.origin + location.pathname + '#einkauf:' + k;
-  const ov = dialog(`<h2>Link für die einkaufende Person</h2>
-    <p class="sum">Dieser Link öffnet nur die Einkaufsliste (Gesamt, Migros, Denner) mit Abhaken und «Nicht erhältlich». Bitte nur an die einkaufende Person weitergeben.</p>
-    <div class="field"><textarea rows="3" readonly>${esc(link)}</textarea></div>
-    <div class="actions"><button class="btn" data-close>Schliessen</button><button class="btn primary" id="lKopie">Kopieren</button></div>`);
-  $('#lKopie', ov).onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Link kopiert.'); ov.remove(); } catch (e) { $('textarea', ov).select(); } };
-}
-
 /* ===== Ansicht für die einkaufende Person ===== */
-function renderEinkauf(root) {
+function renderEinkaufen(main) {
   const { liste } = berechneListe();
   const reiter = [['alle', 'Gesamt'], ['Migros', 'Migros'], ['Denner', 'Denner']];
-  if (!reiter.some(r => r[0] === S.laden)) S.laden = 'alle';
-  const sichtbar = liste.filter(i => S.laden === 'alle' || i.laden === S.laden);
+  if (!reiter.some(r => r[0] === S.ekLaden)) S.ekLaden = 'alle';
+  const sichtbar = liste.filter(i => S.ekLaden === 'alle' || i.laden === S.ekLaden);
   const offen = sichtbar.filter(i => !(i.p && i.p.gekauft)).length;
-  let html = `<header><div class="bar"><h1>Einkaufsliste</h1>
-      <button class="iconbtn" id="neuLaden" title="Neu laden" aria-label="Neu laden">↻</button></div>
-    <div class="tabs" role="tablist">${reiter.map(([k, t]) => `<button class="tab" role="tab" data-r="${k}" aria-selected="${S.laden === k}">${t} (${liste.filter(i => k === 'alle' || i.laden === k).length})</button>`).join('')}</div></header>
-    <main>`;
-  if (S.einkauf && S.einkauf.erledigt_am) html += `<div class="hinweis ok"><b>Als erledigt gemeldet.</b> Danke!</div>`;
+  let html = `<div class="chips" role="group" aria-label="Liste wählen">${reiter.map(([k, t]) => `<button class="chip" data-r="${k}" aria-pressed="${S.ekLaden === k}">${t} (${liste.filter(i => k === 'alle' || i.laden === k).length})</button>`).join('')}</div>`;
+  if (S.einkauf && S.einkauf.erledigt_am) html += `<div class="hinweis ok"><b>Als erledigt gemeldet.</b></div>`;
   if (!sichtbar.length) html += `<div class="card"><div class="empty">Keine Artikel auf dieser Liste.</div></div>`;
   const g = gruppiere(sichtbar, i => i.laden);
   for (const l of LAEDEN.concat([OHNE_LADEN])) {
@@ -428,12 +428,11 @@ function renderEinkauf(root) {
   }
   const erledigt = S.einkauf && S.einkauf.erledigt_am;
   html += `<p class="sum" style="margin-top:14px">${offen} noch offen.</p>
-    <div class="footer-actions"><button class="btn ${erledigt ? '' : 'primary'}" id="erledigt">${erledigt ? 'Erledigt-Meldung zurücknehmen' : 'Einkauf erledigt'}</button></div></main>`;
-  root.innerHTML = html;
-  root.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { S.laden = b.dataset.r; render(); });
-  $('#neuLaden').onclick = () => laden();
+    <div class="footer-actions"><button class="btn ${erledigt ? '' : 'primary'}" id="erledigt">${erledigt ? 'Erledigt-Meldung zurücknehmen' : 'Einkauf erledigt'}</button></div>`;
+  main.innerHTML = html;
+  main.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { S.ekLaden = b.dataset.r; render(); });
   const map = new Map(liste.map(i => [i.a ? 'a' + i.a.id : 'p' + i.p.id, i]));
-  root.querySelectorAll('.row[data-key]').forEach(row => {
+  main.querySelectorAll('.row[data-key]').forEach(row => {
     const i = map.get(row.dataset.key); if (!i) return;
     $('[data-act=gekauft]', row).onchange = e => setzePos(i, { gekauft: e.target.checked });
     $('[data-act=na]', row).onclick = () => setzePos(i, { nicht_erhaeltlich: !(i.p && i.p.nicht_erhaeltlich) });
@@ -626,13 +625,13 @@ function abschliessenDialog() {
 
 /* ===== Vorrat & Artikel ===== */
 const FILTER = [
-  ['alle', 'Alle'], ['routine', 'Routine'], ['aktion', 'Nur Aktion'], ['ohneMin', 'Ohne Mindestbestand'],
+  ['alle', 'Alle'], ['routine', 'Routine'], ['aktion', 'Nur Aktion'], ['ohneBestand', 'Bestand fehlt'],
   ['unterMin', 'Unter Minimum'], ['ohneKat', 'Ohne Kategorie'], ['ohneLaden', 'Ohne Standardladen'],
 ];
 function filterFn(f) {
   return {
     alle: () => true, routine: a => a.routine, aktion: a => a.nur_aktion,
-    ohneMin: a => !isNum(a.mindestbestand) && !a.routine, unterMin: a => grund(a).grund === 'Nachkaufen',
+    ohneBestand: a => !isNum(a.bestand), unterMin: a => grund(a).grund === 'Nachkaufen',
     ohneKat: a => !a.kategorie, ohneLaden: a => !a.standardladen,
   }[f];
 }
@@ -680,7 +679,7 @@ function renderArtikel(main) {
 
 /* Artikel anlegen / bearbeiten – alle Felder, damit die Tabelle vollständig bleibt */
 function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
-  const neu = !a; const v = Object.assign({ laeden: [], routine: null, nur_aktion: false }, a || vorlage);
+  const neu = !a; const v = Object.assign({ laeden: [], routine: null, nur_aktion: false, mindestbestand: 0 }, a || vorlage);
   const ov = dialog(`<h2>${neu ? 'Neuer Artikel' : 'Artikel bearbeiten'}</h2>
     <form id="aForm" novalidate>
     <div class="field"><label for="fName">Name *</label><input type="text" id="fName" value="${esc(v.name || '')}" placeholder="z. B. M-Classic Thon"></div>
@@ -808,42 +807,111 @@ async function laden() {
     S.pos = await S.api.positionen(S.einkauf.id);
     render();
   } catch (e) {
-    if (e.status === 401 || e.status === 403) { store.del(KEY_STORE); return einrichten('Der gespeicherte Zugang funktioniert nicht mehr. Bitte den App-Link erneut öffnen.'); }
+    if (e.status === 401) return anmelden('Deine Anmeldung ist abgelaufen. Bitte neu anmelden.');
     $('#root').innerHTML = `<div class="setup"><h1>Keine Verbindung</h1><p>${esc(e.message)}</p><button class="btn primary" onclick="location.reload()">Nochmals versuchen</button></div>`;
   }
 }
 
-function einrichten(meldung) {
+/* ---------- Anmeldung ---------- */
+function anmelden(meldung) {
   $('#root').innerHTML = `<div class="setup"><img src="icon-192.png" alt="" onerror="this.remove()"><h1>Einkauf & Vorrat</h1>
-    <p>${esc(meldung || 'Einmalig: Bitte den App-Link öffnen, den du bekommen hast, oder den Zugangsschlüssel hier einfügen.')}</p>
-    <input id="schl" placeholder="sb_publishable_…" autocomplete="off"><div class="err" id="sErr"></div>
-    <button class="btn primary" id="sOk">Speichern und öffnen</button></div>`;
-  $('#sOk').onclick = async () => {
-    const k = $('#schl').value.trim();
-    if (!k) return;
-    try { await restApi(k).pruefen(); store.set(KEY_STORE, k); S.api = restApi(k); laden(); }
-    catch (e) { $('#sErr').textContent = 'Dieser Schlüssel funktioniert nicht.'; }
+    <p>${esc(meldung || 'Melde dich mit deiner E-Mail-Adresse an. Du bekommst einen Link per Mail, ein Passwort brauchst du nicht.')}</p>
+    <form id="lForm" novalidate><input id="lMail" type="email" autocomplete="email" placeholder="deine@email.ch">
+    <div class="err" id="lErr"></div><button class="btn primary" id="lOk">Anmelde-Link senden</button></form></div>`;
+  $('#lForm').onsubmit = async ev => {
+    ev.preventDefault();
+    const email = $('#lMail').value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return $('#lErr').textContent = 'Bitte eine gültige E-Mail-Adresse eingeben.';
+    $('#lOk').disabled = true;
+    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
+    if (error) { $('#lOk').disabled = false; return $('#lErr').textContent = /rate|second/i.test(error.message) ? 'Zu viele Versuche. Bitte einige Minuten warten.' : 'Senden fehlgeschlagen: ' + error.message; }
+    $('#root').innerHTML = `<div class="setup"><h1>Mail ist unterwegs</h1><p>Wir haben einen Anmelde-Link an <b>${esc(email)}</b> geschickt. Öffne ihn auf diesem Gerät. Schau auch im Spam-Ordner nach.</p>
+      <button class="btn" onclick="location.reload()">Zurück</button></div>`;
   };
 }
 
-(function start() {
-  const MODUS_STORE = 'einkauf-app-modus';
+function wartet(profil) {
+  $('#root').innerHTML = `<div class="setup"><h1>Fast geschafft</h1>
+    <p>Du bist als <b>${esc(profil.email)}</b> angemeldet. Ein Admin muss dich noch freischalten. Danach diese Seite neu laden.</p>
+    <button class="btn primary" onclick="location.reload()">Neu laden</button>
+    <button class="btn" id="abm">Abmelden</button></div>`;
+  $('#abm').onclick = abmelden;
+}
+
+async function abmelden() { if (sb) await sb.auth.signOut(); location.reload(); }
+
+async function startMitSitzung(session) {
+  S.api = restApi(async () => { const { data } = await sb.auth.getSession(); return data.session ? data.session.access_token : session.access_token; });
+  try {
+    const profil = await S.api.meinProfil(session.user.id);
+    if (!profil) return wartet({ email: session.user.email });
+    S.profil = profil;
+    if (profil.rolle === 'wartend') return wartet(profil);
+    S.modus = profil.rolle === 'einkauf' ? 'einkauf' : 'admin';
+    laden();
+  } catch (e) {
+    $('#root').innerHTML = `<div class="setup"><h1>Keine Verbindung</h1><p>${esc(e.message)}</p><button class="btn primary" onclick="location.reload()">Nochmals versuchen</button></div>`;
+  }
+}
+
+/* Menü oben rechts */
+function menue() {
+  const admin = S.profil && S.profil.rolle === 'admin';
+  const ov = dialog(`<h2>Menü</h2>
+    <p class="sum">Angemeldet als ${esc(S.profil ? S.profil.email : '')} (${esc(S.profil ? S.profil.rolle : '')})</p>
+    <div class="opts" style="flex-direction:column;align-items:stretch">
+      ${admin ? `<button class="btn" id="mBenutzer">Benutzer verwalten</button>` : ''}
+      <button class="btn" id="mAbmelden">Abmelden</button>
+    </div><div class="actions"><button class="btn" data-close>Schliessen</button></div>`);
+  if (admin) {
+    $('#mBenutzer', ov).onclick = () => { ov.remove(); benutzerDialog(); };
+  }
+  $('#mAbmelden', ov).onclick = abmelden;
+}
+
+async function benutzerDialog() {
+  let liste;
+  try { liste = await S.api.benutzer(); } catch (e) { return fehler(e); }
+  const rollen = [['admin', 'Admin'], ['einkauf', 'Einkauf'], ['wartend', 'Gesperrt / wartet']];
+  const ov = dialog(`<h2>Benutzer</h2>
+    <p class="sum">Neue Personen melden sich selbst mit ihrer E-Mail an und erscheinen hier als «wartet». Gib ihnen dann eine Rolle.</p>
+    <div class="card">${liste.map(b => `<div class="row" data-id="${esc(b.id)}"><div class="main"><div class="name">${esc(b.email)}</div>
+      <div class="meta">${b.id === S.profil.id ? 'Das bist du' : ''}</div></div>
+      ${b.id === S.profil.id ? `<span class="tag">Admin</span>` : `<select class="laden" data-rolle>${rollen.map(([k, t]) => `<option value="${k}" ${b.rolle === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <button class="iconbtn" data-weg aria-label="Entfernen">✕</button>`}</div>`).join('')}</div>
+    <div class="actions"><button class="btn" data-close>Fertig</button></div>`);
+  ov.querySelectorAll('.row[data-id]').forEach(row => {
+    const id = row.dataset.id, sel = $('[data-rolle]', row), weg = $('[data-weg]', row);
+    if (sel) sel.onchange = async () => { try { await S.api.benutzerRolle(id, sel.value); toast('Rolle gespeichert.'); } catch (e) { fehler(e); } };
+    if (weg) weg.onclick = async () => { try { await S.api.benutzerLoeschen(id); row.remove(); toast('Entfernt. Die Person kann sich neu anmelden und wartet dann wieder auf Freigabe.'); } catch (e) { fehler(e); } };
+  });
+}
+
+(async function start() {
+  store.del(KEY_STORE); store.del('einkauf-app-modus');   // alte Schlüssel-Links aus Version 1
   if (/[?&]demo\b/.test(location.search)) {
     S.modus = /[?&]einkauf\b/.test(location.search) ? 'einkauf' : 'admin';
+    S.profil = { id: 'demo', email: 'demo@example.ch', rolle: S.modus === 'einkauf' ? 'einkauf' : 'admin' };
     S.api = demoApi(); return laden();
   }
-  // Admin-Link: #sb_publishable_…   Einkaufs-Link: #einkauf:sb_publishable_…
-  let ausLink = decodeURIComponent((location.hash || '').slice(1)).trim(), neuerModus = null;
-  if (ausLink.startsWith('einkauf:')) { ausLink = ausLink.slice(8); neuerModus = 'einkauf'; }
-  else if (ausLink.startsWith('sb_publishable_')) neuerModus = 'admin';
-  if (neuerModus && ausLink.startsWith('sb_publishable_')) {
-    store.set(KEY_STORE, ausLink); store.set(MODUS_STORE, neuerModus);
-    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
-  } else ausLink = '';
-  S.modus = store.get(MODUS_STORE) || 'admin';
-  const k = ausLink || store.get(KEY_STORE);
-  if (!k) return einrichten();
-  S.api = restApi(k); laden();
+  if (!window.supabase) {
+    $('#root').innerHTML = `<div class="setup"><h1>Keine Verbindung</h1><p>Die App konnte nicht vollständig geladen werden. Bitte Internetverbindung prüfen.</p><button class="btn primary" onclick="location.reload()">Nochmals versuchen</button></div>`;
+    return;
+  }
+  // Fehler aus dem Anmelde-Link (z. B. abgelaufen)
+  const hp = new URLSearchParams((location.hash || '').slice(1));
+  if (hp.get('error')) {
+    history.replaceState(null, '', location.pathname);
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { flowType: 'implicit' } });
+    return anmelden(hp.get('error_code') === 'otp_expired' ? 'Der Anmelde-Link ist abgelaufen oder wurde schon benutzt. Bitte einen neuen anfordern.' : 'Anmeldung fehlgeschlagen. Bitte nochmals versuchen.');
+  }
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { flowType: 'implicit', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  const { data } = await sb.auth.getSession();
+  if (location.hash.includes('access_token')) history.replaceState(null, '', location.pathname);
+  if (data.session) return startMitSitzung(data.session);
+  let gestartet = false;
+  sb.auth.onAuthStateChange((ev, session) => { if (ev === 'SIGNED_IN' && session && !gestartet) { gestartet = true; startMitSitzung(session); } });
+  anmelden();
 })();
 </script>
 </body>
