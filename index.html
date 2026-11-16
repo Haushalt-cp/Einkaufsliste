@@ -115,6 +115,7 @@
   .zaehler .iconbtn { border: 1.5px solid var(--line); background: #fff; width: 32px; height: 32px; color: var(--ink); }
   .zaehler .num { width: 44px; padding: 5px 2px; }
   .tag.aktion { background: #e2574c; color: #fff; }
+  details.card.vorschlag { border-color: #b9d3be; background: #f4f9f4; margin-bottom: 10px; }
   .wochenkopf { background: var(--ink); color: #fff; border-radius: var(--radius); padding: 12px 14px; margin: 4px 0 10px; }
   .wk-gross { font-size: 19px; font-weight: 800; line-height: 1.25; }
   .wk-klein { font-size: 14px; opacity: .85; margin-top: 2px; }
@@ -200,6 +201,7 @@ function restApi(tokenHolen) {
     benutzerRolle: (id, rolle) => call('PATCH', 'benutzer?id=eq.' + id, { rolle }, 'return=representation').then(r => r[0]),
     benutzerLoeschen: id => call('DELETE', 'benutzer?id=eq.' + id),
     aktionen: () => call('GET', 'aktion_aktuell?select=*&order=laden.asc,name.asc'),
+    verlauf: () => call('GET', 'einkauf_position?select=artikel_id,freitext,kategorie,laden,menge_fix,menge_gekauft,einkauf_id,einkauf!inner(abgeschlossen_am)&gekauft=is.true&einkauf.abgeschlossen_am=not.is.null&order=id.desc&limit=3000'),
     aktionenAktualisieren: async () => {
       const token = await tokenHolen();
       const res = await fetch(SUPABASE_URL + '/functions/v1/aktionen-holen', { method: 'POST', headers: { Authorization: 'Bearer ' + token, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' }, body: '{}' });
@@ -248,13 +250,20 @@ function demoApi() {
       { id: 504, laden: 'Migros', name: 'Blumenkohl', beschreibung: 'Schweiz, per Stück', preis: 2.95, preis_alt: 4.2, rabatt: '30%', kategorie: null, gueltig_von: '2026-11-18', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
     ]),
     aktionenAktualisieren: () => later({ ergebnis: [] }),
+    verlauf: () => { const t = d => new Date(Date.now() - d * 864e5).toISOString(); return later([
+      { artikel_id: 5, freitext: null, kategorie: null, laden: null, menge_fix: 1, menge_gekauft: null, einkauf_id: 1, einkauf: { abgeschlossen_am: t(43) } },
+      { artikel_id: 5, freitext: null, kategorie: null, laden: null, menge_fix: 1, menge_gekauft: null, einkauf_id: 2, einkauf: { abgeschlossen_am: t(29) } },
+      { artikel_id: 5, freitext: null, kategorie: null, laden: null, menge_fix: 2, menge_gekauft: 1, einkauf_id: 3, einkauf: { abgeschlossen_am: t(15) } },
+      { artikel_id: null, freitext: 'Bananen', kategorie: 'Früchte', laden: 'Migros', menge_fix: 1, menge_gekauft: null, einkauf_id: 3, einkauf: { abgeschlossen_am: t(15) } },
+      { artikel_id: null, freitext: 'Bananen', kategorie: 'Früchte', laden: 'Migros', menge_fix: 1, menge_gekauft: null, einkauf_id: 4, einkauf: { abgeschlossen_am: t(8) } },
+    ]); },
   };
 }
 
 /* ---------- Zustand ---------- */
 const S = {
   api: null, artikel: [], einkauf: null, pos: [], frueher: [],
-  tab: 'liste', suche: '', filter: 'alle', laden: 'alle', ekLaden: 'alle', aktionen: [], akLaden: 'Denner', akSuche: '', akFilter: 'alle',
+  tab: 'einkaufen', suche: '', filter: 'alle', laden: 'alle', ekLaden: 'alle', aktionen: [], akLaden: 'Denner', akSuche: '', akFilter: 'alle',
 };
 const posFor = id => S.pos.find(p => p.artikel_id === id);
 const artById = id => S.artikel.find(a => a.id === id);
@@ -311,8 +320,8 @@ function render() {
   const root = $('#root');
   const y = window.scrollY;
   const admin = S.modus !== 'einkauf';
-  const tabs = admin ? [['liste', 'Planen'], ['aktionen', 'Aktionen'], ['artikel', 'Vorrat'], ['einkaufen', 'Einkaufen']] : [['artikel', 'Vorrat'], ['einkaufen', 'Einkaufen']];
-  if (!tabs.some(t => t[0] === S.tab)) S.tab = admin ? 'liste' : 'einkaufen';
+  const tabs = admin ? [['artikel', 'Vorrat'], ['aktionen', 'Aktionen'], ['einkaufen', 'Einkaufen']] : [['artikel', 'Vorrat'], ['einkaufen', 'Einkaufen']];
+  if (!tabs.some(t => t[0] === S.tab)) S.tab = 'einkaufen';
   root.innerHTML = `
     <header>
       <div class="bar"><h1>${admin ? 'Einkauf & Vorrat' : 'Einkaufsliste'}</h1>
@@ -326,7 +335,6 @@ function render() {
   $('#menue').onclick = menue;
   const main = $('#main');
   if (S.tab === 'einkaufen') renderEinkaufen(main);
-  else if (S.tab === 'liste') renderListe(main);
   else if (S.tab === 'aktionen') renderAktionen(main);
   else renderArtikel(main);
   window.scrollTo(0, y);
@@ -343,76 +351,6 @@ function gruppiere(items, key) {
 }
 
 /* ===== Einkaufsliste ===== */
-function renderListe(main) {
-  const { liste, aktion, entfernt } = berechneListe();
-  const ladenListe = LAEDEN.concat([OHNE_LADEN]).filter(l => liste.some(i => i.laden === l));
-  if (S.laden !== 'alle' && !ladenListe.includes(S.laden)) S.laden = 'alle';
-  const sichtbar = liste.filter(i => S.laden === 'alle' || i.laden === S.laden);
-  const offen = liste.filter(i => !(i.p && i.p.gekauft)).length;
-
-  let html = hinweise(liste) + `<div class="chips" role="group" aria-label="Laden filtern">
-      <button class="chip" data-laden="alle" aria-pressed="${S.laden === 'alle'}">Alle (${liste.length})</button>
-      ${ladenListe.map(l => `<button class="chip" data-laden="${esc(l)}" aria-pressed="${S.laden === l}">${esc(l)} (${liste.filter(i => i.laden === l).length})</button>`).join('')}
-    </div>`;
-
-  if (!liste.length) html += `<div class="card"><div class="empty">Noch nichts auf der Liste. Routineartikel und Artikel unter dem Mindestbestand erscheinen hier automatisch.</div></div>`;
-
-  const nachLaden = gruppiere(sichtbar, i => i.laden);
-  for (const l of ladenListe) {
-    const items = nachLaden.get(l); if (!items) continue;
-    html += `<h2>${ladenPill(l)} <span class="sum">${items.filter(i => !(i.p && i.p.gekauft)).length} offen</span>
-      <button class="btn small" data-kopieren="${esc(l)}" style="margin-left:auto">Liste kopieren</button></h2><div class="card">`;
-    const nachKat = gruppiere(items.sort((x, y) => coll.compare(x.kategorie, y.kategorie) || coll.compare(x.name, y.name)), i => i.kategorie);
-    let first = true;
-    for (const [kat, its] of nachKat) {
-      html += `<div class="row" style="padding:6px 12px;${first ? '' : ''}"><h3 style="margin:0">${esc(kat)}</h3></div>`;
-      first = false;
-      for (const i of its) html += listenZeile(i);
-    }
-    html += `</div>`;
-  }
-
-  // Nur-Aktion-Artikel
-  if (aktion.length) {
-    const sorted = aktion.sort((x, y) => (y.faellig - x.faellig) || coll.compare(x.name, y.name));
-    const faellig = aktion.filter(i => i.faellig).length;
-    html += `<h2>Nur bei Aktion</h2>
-      <details class="card" ${faellig ? 'open' : ''}><summary>${aktion.length} Artikel – diese Woche in Aktion? ${faellig ? `<span class="tag warn">${faellig} fällig</span>` : ''}</summary>
-      <div class="rows">${sorted.map(i => `
-        <div class="row"><div class="main"><div class="name">${esc(i.name)}</div>
-          <div class="meta">${ladenPill(i.laden)} ${vorratText(i.a)} ${i.faellig ? `<span class="tag warn">${esc(i.grund)}</span>` : ''}${aktionFuer(i.a) ? ` <span class="tag aktion">Aktion ${esc(aktionFuer(i.a).laden)} ${esc(aktionFuer(i.a).rabatt || '')}</span>` : ''}</div></div>
-          <button class="btn small" data-aufnehmen="${i.a.id}">In Aktion → aufnehmen</button></div>`).join('')}</div></details>`;
-  }
-  if (entfernt.length) {
-    html += `<h2>Diese Woche entfernt</h2><details class="card"><summary>${entfernt.length} Artikel</summary><div class="rows">
-      ${entfernt.map(i => `<div class="row"><div class="main"><div class="name">${esc(i.name)}</div><div class="meta">${ladenPill(i.laden)}</div></div>
-      <button class="btn small" data-zurueck="${i.a.id}">Zurückholen</button></div>`).join('')}</div></details>`;
-  }
-
-  html += `<div class="footer-actions">
-      <button class="btn" id="exportListe">Liste als Text kopieren</button>
-      <button class="btn primary" id="abschliessen" ${liste.length ? '' : 'disabled'}>Einkauf abschliessen</button>
-    </div>
-    <p class="sum" style="margin-top:8px">${offen} von ${liste.length} noch offen. «Einkauf abschliessen» bucht gekaufte Vorratsartikel in den Bestand und startet die nächste Liste.</p>
-    <button class="btn primary fab" id="hinzu">+ Hinzufügen</button>`;
-  main.innerHTML = html;
-
-  main.querySelectorAll('[data-laden]').forEach(b => b.onclick = () => { S.laden = b.dataset.laden; render(); });
-  main.querySelectorAll('[data-aufnehmen]').forEach(b => b.onclick = () => {
-    const a = artById(+b.dataset.aufnehmen), g = grund(a), p = posFor(a.id);
-    setzePos({ a, p }, { aufnehmen: true, in_aktion: true, menge_fix: (p && p.menge_fix) || Math.max(1, g.menge) });
-  });
-  const ab = $('#hAbschliessen'); if (ab) ab.onclick = abschliessenDialog;
-  main.querySelectorAll('[data-zurueck]').forEach(b => b.onclick = () => {
-    const a = artById(+b.dataset.zurueck); setzePos({ a, p: posFor(a.id) }, { aufnehmen: a.nur_aktion ? true : null });
-  });
-  main.querySelectorAll('[data-kopieren]').forEach(b => b.onclick = () => kopiereText(textListe(liste.filter(i => i.laden === b.dataset.kopieren))));
-  $('#exportListe').onclick = () => kopiereText(textListe(liste));
-  $('#abschliessen').onclick = abschliessenDialog;
-  $('#hinzu').onclick = hinzufuegenDialog;
-  verdrahteZeilen(main, liste);
-}
-
 function vorratText(a) {
   if (!a) return '';
   const b = isNum(a.bestand) ? fmt(a.bestand) : '?';
@@ -441,83 +379,154 @@ const gekauftAnders = i => i.p && i.p.menge_gekauft != null && i.p.menge_gekauft
 const gekaufteMenge = i => (i.p && i.p.menge_gekauft != null) ? i.p.menge_gekauft : i.menge;
 
 function renderEinkaufen(main) {
-  const { liste } = berechneListe();
-  const reiter = [['alle', 'Gesamt'], ['Migros', 'Migros'], ['Denner', 'Denner']];
+  const admin = S.modus !== 'einkauf';
+  const { liste, entfernt } = berechneListe();
+  const weitere = LAEDEN.concat([OHNE_LADEN]).filter(l => !['Migros', 'Denner'].includes(l) && liste.some(i => i.laden === l));
+  const reiter = [['alle', 'Gesamt'], ['Migros', 'Migros'], ['Denner', 'Denner']].concat(weitere.map(l => [l, l]));
   if (!reiter.some(r => r[0] === S.ekLaden)) S.ekLaden = 'alle';
   const sichtbar = liste.filter(i => S.ekLaden === 'alle' || i.laden === S.ekLaden);
   const offen = sichtbar.filter(i => !(i.p && i.p.gekauft)).length;
-  let html = `<div class="chips" role="group" aria-label="Liste wählen">${reiter.map(([k, t]) => `<button class="chip" data-r="${k}" aria-pressed="${S.ekLaden === k}">${t} (${liste.filter(i => k === 'alle' || i.laden === k).length})</button>`).join('')}</div>`;
-  if (S.einkauf && S.einkauf.erledigt_am) html += `<div class="hinweis ok"><b>Als erledigt gemeldet.</b></div>`;
-  if (!sichtbar.length) html += `<div class="card"><div class="empty">Keine Artikel auf dieser Liste.</div></div>`;
+  const erledigt = S.einkauf && S.einkauf.erledigt_am;
+  let html = admin ? hinweise(liste) : (erledigt ? `<div class="hinweis ok"><b>Als erledigt gemeldet.</b></div>` : '');
+  if (admin) html += vorschlagBlock(liste);
+  html += `<div class="chips" role="group" aria-label="Liste wählen">${reiter.map(([k, t]) => `<button class="chip" data-r="${esc(k)}" aria-pressed="${S.ekLaden === k}">${esc(t)} (${liste.filter(i => k === 'alle' || i.laden === k).length})</button>`).join('')}</div>`;
+  if (!sichtbar.length) html += `<div class="card"><div class="empty">${admin ? 'Noch nichts auf der Liste. Routineartikel und Artikel unter dem Minimum erscheinen automatisch. Mit «+ Hinzufügen» oder im Reiter Aktionen kommt mehr dazu.' : 'Keine Artikel auf dieser Liste.'}</div></div>`;
   const g = gruppiere(sichtbar, i => i.laden);
   for (const l of LAEDEN.concat([OHNE_LADEN])) {
     const its = g.get(l); if (!its) continue;
-    html += `<h2>${ladenPill(l)} <span class="sum">${its.filter(i => !(i.p && i.p.gekauft)).length} offen</span></h2><div class="card">`;
-    for (const i of its.sort((x, y) => coll.compare(x.kategorie, y.kategorie) || coll.compare(x.name, y.name))) {
-      const p = i.p || {}, key = i.a ? 'a' + i.a.id : 'p' + p.id;
-      html += `<div class="row${p.gekauft ? ' done' : ''}${p.nicht_erhaeltlich ? ' na' : ''}" data-key="${key}">
-        <input type="checkbox" class="check" data-act="gekauft" ${p.gekauft ? 'checked' : ''} aria-label="Gekauft">
-        <div class="main"><div class="name">${esc(i.name)}</div>
-          <div class="meta">${esc(i.kategorie)}${p.in_aktion ? ' · <span class="tag">Aktion</span>' : ''}${gekauftAnders(i) ? ` · <span class="tag warn">${fmt(p.menge_gekauft)} von ${fmt(i.menge)}</span>` : ''}</div>
-          <button class="btn small ${p.nicht_erhaeltlich ? 'danger' : ''}" data-act="na" style="margin-top:6px">${p.nicht_erhaeltlich ? 'Nicht erhältlich ✓' : 'Nicht erhältlich'}</button></div>
-        <div class="stepper" title="Gekaufte Menge"><button class="iconbtn" data-act="minus" aria-label="Weniger">−</button><span class="menge">${fmt(p.menge_gekauft ?? i.menge)}</span><button class="iconbtn" data-act="plus" aria-label="Mehr">+</button></div>
-      </div>`;
-    }
+    html += `<h2>${ladenPill(l)} <span class="sum">${its.filter(i => !(i.p && i.p.gekauft)).length} offen</span>${admin ? `<button class="btn small" data-kopieren="${esc(l)}" style="margin-left:auto">Kopieren</button>` : ''}</h2><div class="card">`;
+    for (const i of its.sort((x, y) => coll.compare(x.kategorie, y.kategorie) || coll.compare(x.name, y.name))) html += einkaufZeile(i, admin);
     html += `</div>`;
   }
-  const erledigt = S.einkauf && S.einkauf.erledigt_am;
-  html += `<p class="sum" style="margin-top:14px">${offen} noch offen.</p>
-    <div class="footer-actions"><button class="btn ${erledigt ? '' : 'primary'}" id="erledigt">${erledigt ? 'Erledigt-Meldung zurücknehmen' : 'Einkauf erledigt'}</button></div>`;
+  if (admin && entfernt.length) {
+    html += `<h2>Diese Woche entfernt</h2><details class="card"><summary>${entfernt.length} Artikel</summary><div class="rows">
+      ${entfernt.map(i => `<div class="row"><div class="main"><div class="name">${esc(i.name)}</div><div class="meta">${ladenPill(i.laden)}</div></div>
+      <button class="btn small" data-zurueck="${i.a.id}">Zurückholen</button></div>`).join('')}</div></details>`;
+  }
+  html += `<p class="sum" style="margin-top:14px">${offen} noch offen.${admin ? ' «Einkauf abschliessen» bucht die gekauften Mengen in den Vorrat und startet die nächste Liste.' : ''}</p>
+    <div class="footer-actions">
+      ${admin ? `<button class="btn" id="exportListe">Liste als Text kopieren</button>
+        <button class="btn primary" id="abschliessen" ${liste.length ? '' : 'disabled'}>Einkauf abschliessen</button>`
+      : `<button class="btn ${erledigt ? '' : 'primary'}" id="erledigt">${erledigt ? 'Erledigt-Meldung zurücknehmen' : 'Einkauf erledigt'}</button>`}
+    </div>
+    ${admin ? '<button class="btn primary fab" id="hinzu">+ Hinzufügen</button>' : ''}`;
   main.innerHTML = html;
+
   main.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { S.ekLaden = b.dataset.r; render(); });
   const map = new Map(liste.map(i => [i.a ? 'a' + i.a.id : 'p' + i.p.id, i]));
   main.querySelectorAll('.row[data-key]').forEach(row => {
     const i = map.get(row.dataset.key); if (!i) return;
+    const gek = !!(i.p && i.p.gekauft);
     $('[data-act=gekauft]', row).onchange = e => setzePos(i, e.target.checked ? { gekauft: true } : { gekauft: false, menge_gekauft: null });
     const ist = () => (i.p && i.p.menge_gekauft != null) ? i.p.menge_gekauft : i.menge;
-    $('[data-act=plus]', row).onclick = () => setzePos(i, { menge_gekauft: ist() + 1, gekauft: true });
-    $('[data-act=minus]', row).onclick = () => { const n = Math.max(0, ist() - 1); setzePos(i, { menge_gekauft: n, gekauft: n > 0 }); };
+    if (admin && !gek) {
+      // Vor dem Einkauf: geplante Menge
+      $('[data-act=plus]', row).onclick = () => setzePos(i, { menge_fix: i.menge + 1 });
+      $('[data-act=minus]', row).onclick = () => i.menge > 1 ? setzePos(i, { menge_fix: i.menge - 1 }) : entfernen(i);
+    } else {
+      // Beim Einkaufen: tatsächlich gekaufte Menge
+      $('[data-act=plus]', row).onclick = () => setzePos(i, { menge_gekauft: ist() + 1, gekauft: true });
+      $('[data-act=minus]', row).onclick = () => { const n = Math.max(0, ist() - 1); setzePos(i, { menge_gekauft: n, gekauft: n > 0 }); };
+    }
     $('[data-act=na]', row).onclick = () => setzePos(i, { nicht_erhaeltlich: !(i.p && i.p.nicht_erhaeltlich) });
+    const m = $('[data-act=mehr]', row); if (m) m.onclick = () => zeilenMenue(i);
   });
-  $('#erledigt').onclick = async () => {
-    try { S.einkauf = await S.api.einkaufErledigt(S.einkauf.id, !erledigt); } catch (e) { fehler(e); }
-    render(); if (!erledigt) toast('Einkauf als erledigt gemeldet.');
-  };
+  if (admin) {
+    main.querySelectorAll('[data-zurueck]').forEach(b => b.onclick = () => {
+      const a = artById(+b.dataset.zurueck); setzePos({ a, p: posFor(a.id) }, { aufnehmen: a.nur_aktion ? true : null });
+    });
+    main.querySelectorAll('[data-kopieren]').forEach(b => b.onclick = () => kopiereText(textListe(liste.filter(i => i.laden === b.dataset.kopieren))));
+    const ab = $('#hAbschliessen'); if (ab) ab.onclick = abschliessenDialog;
+    $('#exportListe').onclick = () => kopiereText(textListe(liste));
+    $('#abschliessen').onclick = abschliessenDialog;
+    $('#hinzu').onclick = hinzufuegenDialog;
+    verdrahteVorschlaege(main, liste);
+  } else {
+    $('#erledigt').onclick = async () => {
+      try { S.einkauf = await S.api.einkaufErledigt(S.einkauf.id, !erledigt); } catch (e) { fehler(e); }
+      render(); if (!erledigt) toast('Einkauf als erledigt gemeldet.');
+    };
+  }
 }
 
-function listenZeile(i) {
+function einkaufZeile(i, admin) {
   const p = i.p || {}, key = i.a ? 'a' + i.a.id : 'p' + p.id;
-  const cls = (p.gekauft ? ' done' : '') + (p.nicht_erhaeltlich ? ' na' : '');
   const anders = i.a && p.laden && p.laden !== i.a.standardladen;
-  return `<div class="row${cls}" data-key="${key}">
+  const zahl = admin && !p.gekauft ? i.menge : (p.menge_gekauft ?? i.menge);
+  const meta = [esc(i.kategorie)];
+  if (p.in_aktion) meta.push('<span class="tag aktion">Aktion</span>');
+  if (admin && i.grund && i.grund !== 'Aktion') meta.push(`<span class="tag grau">${esc(i.grund)}</span>`);
+  if (admin && i.a) meta.push(vorratText(i.a));
+  if (gekauftAnders(i)) meta.push(`<span class="tag warn">${fmt(p.menge_gekauft)} von ${fmt(i.menge)}</span>`);
+  if (admin && anders) meta.push('<span class="tag">nur diese Woche</span>');
+  return `<div class="row${p.gekauft ? ' done' : ''}${p.nicht_erhaeltlich ? ' na' : ''}" data-key="${key}">
     <input type="checkbox" class="check" data-act="gekauft" ${p.gekauft ? 'checked' : ''} aria-label="Gekauft">
-    <div class="main">
-      <div class="name">${esc(i.name)}</div>
-      <div class="meta">${esc(i.grund)}${i.a ? ' · ' + vorratText(i.a) : ''}${p.gekauft && gekauftAnders(i) ? ` · <span class="tag warn">gekauft ${fmt(p.menge_gekauft)} von ${fmt(i.menge)}</span>` : ''}${anders ? ' · <span class="tag">nur diese Woche</span>' : ''}${p.nicht_erhaeltlich ? ' · <span class="tag warn">nicht erhältlich</span>' : ''}</div>
-      <div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">${ladenSelect(i.laden)}
-        <button class="chip aktion" data-act="aktion" aria-pressed="${!!p.in_aktion}">${p.in_aktion ? 'In Aktion' : 'Aktion?'}</button></div>
-    </div>
-    <div class="stepper">
-      <button class="iconbtn" data-act="minus" aria-label="Weniger">−</button><span>${fmt(i.menge)}</span>
-      <button class="iconbtn" data-act="plus" aria-label="Mehr">+</button>
-    </div>
-    <button class="iconbtn" data-act="mehr" aria-label="Weitere Aktionen">⋯</button>
+    <div class="main"><div class="name">${esc(i.name)}</div>
+      <div class="meta">${meta.join(' · ')}</div>
+      <button class="btn small ${p.nicht_erhaeltlich ? 'danger' : ''}" data-act="na" style="margin-top:6px">${p.nicht_erhaeltlich ? 'Nicht erhältlich ✓' : 'Nicht erhältlich'}</button></div>
+    <div class="stepper" title="${admin && !p.gekauft ? 'Menge auf der Liste' : 'Gekaufte Menge'}"><button class="iconbtn" data-act="minus" aria-label="Weniger">−</button><span class="menge">${fmt(zahl)}</span><button class="iconbtn" data-act="plus" aria-label="Mehr">+</button></div>
+    ${admin ? '<button class="iconbtn" data-act="mehr" aria-label="Weitere Aktionen">⋯</button>' : ''}
   </div>`;
 }
 
-function verdrahteZeilen(main, liste) {
-  const map = new Map(liste.map(i => [i.a ? 'a' + i.a.id : 'p' + i.p.id, i]));
-  main.querySelectorAll('.row[data-key]').forEach(row => {
-    const i = map.get(row.dataset.key); if (!i) return;
-    row.querySelector('[data-act=gekauft]').onchange = e => setzePos(i, { gekauft: e.target.checked });
-    row.querySelector('[data-act=plus]').onclick = () => setzePos(i, { menge_fix: i.menge + 1 });
-    row.querySelector('[data-act=minus]').onclick = () => {
-      if (i.menge > 1) return setzePos(i, { menge_fix: i.menge - 1 });
-      entfernen(i);
-    };
-    row.querySelector('select.laden').onchange = e => ladenGeaendert(i, e.target.value);
-    row.querySelector('[data-act=aktion]').onclick = () => setzePos(i, { in_aktion: !(i.p && i.p.in_aktion) });
-    row.querySelector('[data-act=mehr]').onclick = () => zeilenMenue(i);
+/* ===== Lernende Vorschläge aus abgeschlossenen Einkäufen ===== */
+function kaufrhythmus() {
+  const m = new Map();
+  for (const v of S.verlauf || []) {
+    const datum = v.einkauf && v.einkauf.abgeschlossen_am; if (!datum) continue;
+    const key = v.artikel_id ? 'a' + v.artikel_id : 'f' + String(v.freitext || '').toLowerCase().trim();
+    if (key === 'f') continue;
+    if (!m.has(key)) m.set(key, { key, artikel_id: v.artikel_id, name: v.freitext, kategorie: v.kategorie, laden: v.laden, kaeufe: new Map() });
+    const e = m.get(key);
+    if (!e.kaeufe.has(v.einkauf_id)) e.kaeufe.set(v.einkauf_id, { t: new Date(datum).getTime(), menge: Number(v.menge_gekauft ?? v.menge_fix ?? 1) || 1 });
+  }
+  const jetzt = Date.now(), TAG = 864e5;
+  for (const e of m.values()) {
+    const k = [...e.kaeufe.values()].sort((x, y) => x.t - y.t);
+    e.anzahl = k.length; e.zuletzt = k[k.length - 1].t; e.seitTagen = Math.round((jetzt - e.zuletzt) / TAG);
+    e.intervall = k.length >= 2 ? (k[k.length - 1].t - k[0].t) / (k.length - 1) / TAG : null;
+    const mengen = k.map(x => x.menge).sort((x, y) => x - y); e.menge = mengen[Math.floor(mengen.length / 2)];
+  }
+  return m;
+}
+function vorschlaege(liste) {
+  const auf = new Set(liste.map(i => i.a ? 'a' + i.a.id : 'f' + String(i.name).toLowerCase().trim()));
+  const out = [];
+  for (const e of kaufrhythmus().values()) {
+    if (e.anzahl < 2 || !e.intervall || e.intervall < 3) continue;
+    if (e.seitTagen < e.intervall * 0.85 || auf.has(e.key)) continue;
+    if (e.artikel_id) {
+      const a = artById(e.artikel_id); if (!a || a.routine) continue;
+      const p = posFor(a.id); if (p && p.aufnehmen === false) continue;
+      e.a = a; e.name = a.name; e.laden = a.standardladen || e.laden;
+    }
+    e.faellig = e.seitTagen / e.intervall;
+    out.push(e);
+  }
+  return out.sort((x, y) => y.faellig - x.faellig).slice(0, 15);
+}
+const rhythmusText = e => {
+  const w = e.intervall / 7;
+  return `${w >= 1.5 ? `etwa alle ${Math.round(w)} Wochen` : w >= 0.75 ? 'etwa jede Woche' : `etwa alle ${Math.round(e.intervall)} Tage`} · zuletzt vor ${e.seitTagen} Tagen`;
+};
+function vorschlagBlock(liste) {
+  const v = vorschlaege(liste);
+  if (!(S.verlauf || []).length) return `<details class="card vorschlag"><summary>Vielleicht brauchst du noch …</summary><div class="rows"><div class="row"><div class="empty">Noch keine Vorschläge. Die App lernt aus jedem abgeschlossenen Einkauf, was ihr wie oft kauft, und schlägt es hier vor.</div></div></div></details>`;
+  if (!v.length) return '';
+  return `<details class="card vorschlag" open><summary>Vielleicht brauchst du noch … <span class="tag">${v.length}</span></summary><div class="rows">
+    ${v.map(e => `<div class="row"><div class="main"><div class="name">${esc(e.name)}</div>
+      <div class="meta">${e.laden ? ladenPill(e.laden) + ' ' : ''}${rhythmusText(e)}${e.a ? ' · ' + vorratText(e.a) : ''}${e.a && aktionFuer(e.a) ? ' <span class="tag aktion">in Aktion</span>' : ''}</div></div>
+      <button class="btn small primary" data-vorschlag="${esc(e.key)}">+ ${fmt(e.menge)}</button></div>`).join('')}</div></details>`;
+}
+function verdrahteVorschlaege(main, liste) {
+  const v = new Map(vorschlaege(liste).map(e => [e.key, e]));
+  main.querySelectorAll('[data-vorschlag]').forEach(b => b.onclick = async () => {
+    const e = v.get(b.dataset.vorschlag); if (!e) return;
+    try {
+      if (e.a) { const p = posFor(e.a.id); await setzePos({ a: e.a, p }, { aufnehmen: true, menge_fix: e.menge || 1 }); }
+      else { S.pos.push(await S.api.positionNeu({ einkauf_id: S.einkauf.id, freitext: e.name, kategorie: e.kategorie, laden: e.laden || 'Migros', menge_fix: e.menge || 1 })); render(); }
+      toast(`«${e.name}» auf der Liste.`);
+    } catch (err) { fehler(err); }
   });
 }
 
@@ -544,16 +553,28 @@ async function ladenGeaendert(i, laden) {
 function zeilenMenue(i) {
   const p = i.p || {};
   const ov = dialog(`<h2>${esc(i.name)}</h2>
-    <div class="field"><div class="lbl">Menge diese Woche</div>
-      <input type="number" min="1" step="1" id="mMenge" value="${fmt(i.menge)}" inputmode="numeric"></div>
+    <div class="two">
+      <div class="field"><div class="lbl">Menge diese Woche</div>
+        <input type="number" min="1" step="1" id="mMenge" value="${fmt(i.menge)}" inputmode="numeric"></div>
+      <div class="field"><div class="lbl">Laden diese Woche</div>${ladenSelect(i.laden, 'laden mLaden')}</div>
+    </div>
+    <label class="opt"><input type="checkbox" id="mAktion" ${p.in_aktion ? 'checked' : ''}>Diese Woche in Aktion</label>
     <div class="opts" style="margin:12px 0">
       <button class="btn" id="mNA">${p.nicht_erhaeltlich ? 'Wieder erhältlich' : 'Nicht erhältlich'}</button>
       <button class="btn danger" id="mWeg">Diese Woche entfernen</button>
       ${i.a ? `<button class="btn" id="mBearb">Artikel bearbeiten</button>` : ''}
       ${!i.a ? `<button class="btn" id="mAlsArtikel">Als Vorratsartikel speichern</button>` : ''}
     </div>
-    <div class="actions"><button class="btn" data-close>Schliessen</button><button class="btn primary" id="mOk">Menge speichern</button></div>`);
-  $('#mOk', ov).onclick = () => { const v = Math.round(toNum($('#mMenge', ov).value)); if (v >= 1) setzePos(i, { menge_fix: v }); ov.remove(); };
+    <div class="actions"><button class="btn" data-close>Schliessen</button><button class="btn primary" id="mOk">Speichern</button></div>`);
+  $('#mOk', ov).onclick = async () => {
+    const v = Math.round(toNum($('#mMenge', ov).value)), aktion = $('#mAktion', ov).checked, laden = $('.mLaden', ov).value;
+    ov.remove();
+    const aend = {};
+    if (v >= 1 && v !== i.menge) aend.menge_fix = v;
+    if (aktion !== !!p.in_aktion) aend.in_aktion = aktion;
+    if (Object.keys(aend).length) await setzePos(i, aend);
+    if (laden !== i.laden && laden !== OHNE_LADEN) await ladenGeaendert(i, laden);
+  };
   $('#mNA', ov).onclick = () => { setzePos(i, { nicht_erhaeltlich: !p.nicht_erhaeltlich }); ov.remove(); };
   $('#mWeg', ov).onclick = () => { ov.remove(); entfernen(i); };
   if (i.a) $('#mBearb', ov).onclick = () => { ov.remove(); artikelDialog(i.a); };
@@ -697,6 +718,7 @@ function aktionFuer(a) {
   if (!a) return null;
   return aktiveAktionen().find(ak => passenderArtikel(ak) === a) || null;
 }
+function oftGekauft(a) { const e = kaufrhythmus().get('a' + a.id); return !!(e && e.anzahl >= 2); }
 function aktionPosition(ak) {
   return S.pos.find(p => p.aktion_id === ak.id) || null;
 }
@@ -719,8 +741,8 @@ function renderAktionen(main) {
   if (S.akFilter === 'liste') liste = liste.filter(x => aktionPosition(x));
   let html = `<div class="wochenkopf"><div class="wk-gross">Aktionen für den Einkauf am ${esc(datumLang(tag))}</div>
       <div class="wk-klein">${esc(S.akLaden)}${zeitraum ? ` · gültig ${esc(zeitraum)}` : ''}</div></div>
-    ${nochNicht ? `<div class="hinweis warn">Die ${esc(S.akLaden)}-Aktionen für ${esc(datumLang(tag))} sind noch nicht veröffentlicht${S.akLaden === 'Migros' ? ' (meist ab Dienstag/Mittwoch)' : ' (meist ab Dienstag)'}. Angezeigt werden die aktuell gültigen Aktionen – bitte die Daten beachten.</div>` : ''}
-    <div class="chips">${['Migros', 'Denner'].map(l => `<button class="chip" data-akl="${l}" aria-pressed="${S.akLaden === l}">${l} (${proLaden(l).length || aktiv.filter(x => x.laden === l).length})</button>`).join('')}</div>
+    ${nochNicht ? `<div class="hinweis warn">Die ${esc(S.akLaden)}-Aktionen für ${esc(datumLang(tag))} sind noch nicht veröffentlicht${S.akLaden === 'Migros' ? ' (meist ab Dienstag/Mittwoch)' : S.akLaden === 'Lidl' ? ' (meist ab Montag)' : ' (meist ab Dienstag)'}. Angezeigt werden die aktuell gültigen Aktionen – bitte die Daten beachten.</div>` : ''}
+    <div class="chips">${['Migros', 'Denner', 'Lidl'].map(l => `<button class="chip" data-akl="${l}" aria-pressed="${S.akLaden === l}">${l} (${proLaden(l).length || aktiv.filter(x => x.laden === l).length})</button>`).join('')}</div>
     <input class="search" id="akSuche" placeholder="In den Aktionen suchen …" value="${esc(S.akSuche)}" autocomplete="off">
     <div class="chips">${[['alle', 'Alle'], ['meine', 'Passt zu meinen Artikeln'], ['liste', 'Auf der Liste']].map(([k, t]) => `<button class="chip" data-akf="${k}" aria-pressed="${S.akFilter === k}">${t}</button>`).join('')}</div>
     <p class="sum">${zeit ? `Stand: ${zeit.toLocaleDateString('de-CH')} ${zeit.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })}. Wird Di und Mi automatisch aktualisiert.` : 'Noch keine Aktionen geladen.'}
@@ -741,7 +763,7 @@ function renderAktionen(main) {
     const g = gruppiere(rest.sort((x, y) => (nonFood(x.kategorie) - nonFood(y.kategorie)) || coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)), x => x.kategorie || 'Weitere Aktionen');
     for (const [k, its] of g) html += block(k, its);
   }
-  html += `<p class="sum" style="margin-top:14px">Quellen: Migros direkt von migros.ch (Region Aare), Denner von denner.ch und aktionis.ch. Verfügbarkeit im Laden kann abweichen.</p>`;
+  html += `<p class="sum" style="margin-top:14px">Quellen: Migros von migros.ch (Region Aare), Denner von denner.ch und aktionis.ch, Lidl von lidl.ch. Verfügbarkeit im Laden kann abweichen.</p>`;
   main.innerHTML = html;
 
   main.querySelectorAll('[data-akl]').forEach(b => b.onclick = () => { S.akLaden = b.dataset.akl; render(); });
@@ -769,7 +791,7 @@ function aktionZeile(ak) {
     <div class="main"><div class="name">${esc(ak.name)}</div>
       <div class="meta">${esc((ak.beschreibung || '').replace(/,?\s*Angebot gilt nur.*$/i, ''))}${bis}</div>
       <div class="preis">${preis}</div>
-      ${a ? `<div class="meta">Dein Artikel: <b>${esc(a.name)}</b> · ${vorratText(a)}</div>` : ''}
+      ${a ? `<div class="meta">Dein Artikel: <b>${esc(a.name)}</b> · ${vorratText(a)}${oftGekauft(a) ? ' <span class="tag">kaufst du regelmässig</span>' : ''}</div>` : ''}
     </div>
     <div class="stepper ak-stepper${p ? ' aktiv' : ''}" title="Anzahl auf der Einkaufsliste"><button class="iconbtn" data-akd="-1" aria-label="Weniger" ${p ? '' : 'disabled'}>−</button><span>${menge}</span><button class="iconbtn" data-akd="1" aria-label="Mehr">+</button></div>
   </div>`;
@@ -1013,7 +1035,10 @@ async function laden() {
   try {
     const [artikel, einkaufAlt, frueher] = await Promise.all([S.api.artikel(), S.api.offenerEinkauf(), S.api.fruehereZusatz()]);
     S.artikel = artikel; S.frueher = frueher || [];
-    if (S.modus !== 'einkauf') { try { S.aktionen = await S.api.aktionen(); } catch (e) { S.aktionen = []; console.error(e); } }
+    if (S.modus !== 'einkauf') {
+      try { S.aktionen = await S.api.aktionen(); } catch (e) { S.aktionen = []; console.error(e); }
+      try { S.verlauf = await S.api.verlauf(); } catch (e) { S.verlauf = []; console.error(e); }
+    }
     S.einkauf = einkaufAlt || await S.api.einkaufNeu();
     S.pos = await S.api.positionen(S.einkauf.id);
     render();

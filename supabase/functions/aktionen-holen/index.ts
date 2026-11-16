@@ -1,4 +1,4 @@
-// Holt die Wochenaktionen von Denner (denner.ch + aktionis.ch) und Migros (migros.ch, Region Aare; Notfall aktionis.ch)
+// Holt die Wochenaktionen von Denner (denner.ch + aktionis.ch), Migros (migros.ch, Region Aare; Notfall aktionis.ch) und Lidl (lidl.ch)
 // und speichert sie in aktion_abruf / aktion_angebot.
 // Aufruf: zeitgesteuert (Header x-abruf-token) oder von einem Admin der App (Login-Token).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -38,7 +38,8 @@ const datum = (unix: unknown) => {
   if (!Number.isFinite(n) || n <= 0) return null;
   return new Date(n * 1000).toISOString().slice(0, 10);
 };
-const ent = (s: string) => s.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+const ENT: Record<string, string> = { amp: "&", quot: '"', lt: "<", gt: ">", nbsp: " ", ndash: "–", mdash: "—", auml: "ä", ouml: "ö", uuml: "ü", Auml: "Ä", Ouml: "Ö", Uuml: "Ü", szlig: "ß", eacute: "é", egrave: "è", agrave: "à", ccedil: "ç", rsquo: "’", lsquo: "‘", ldquo: "“", rdquo: "”", reg: "®", trade: "™", deg: "°", frac12: "½", euro: "€" };
+const ent = (s: string) => s.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&([a-zA-Z0-9]+);/g, (m, n) => ENT[n] ?? m).replace(/\s+/g, " ").trim();
 
 /* ---------- Denner: Nuxt-Daten (devalue-Format) ---------- */
 function nuxtDaten(html: string): unknown[] {
@@ -230,8 +231,56 @@ async function migros(): Promise<Angebot[]> {
   return await aktionis("migros", /migros/i);   // Notfall: aktionis.ch (nicht regional)
 }
 
+/* ---------- Lidl: Wochenaktion-Seiten auf lidl.ch ---------- */
+const tagCH = (unix: unknown) => {
+  const n = Number(unix);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Zurich" }).format(new Date(n * 1000));
+};
+const ohneHtml = (s: string) => {
+  const teile = [...String(s || "").matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => ent(m[1].replace(/<[^>]+>/g, " "))).filter(Boolean);
+  const text = teile.length ? teile.slice(0, 3).join(", ") : ent(String(s || "").replace(/<[^>]+>/g, " "));
+  return text.length > 90 ? text.slice(0, 88).replace(/[ ,]+[^ ,]*$/, "") + " …" : text;
+};
+async function lidl(): Promise<Angebot[]> {
+  const start = await holen("https://www.lidl.ch/");
+  const seiten = [...new Set([...start.matchAll(/href="(\/c\/de-CH\/store\/wochenaktion\/a\d+)"/g)].map((m) => m[1]))];
+  if (!seiten.length) throw new Error("Lidl: keine Wochenaktion-Seiten gefunden");
+  const angebote: Angebot[] = [];
+  for (const pfad of seiten.slice(0, 6)) {
+    let html = "";
+    try { html = await holen("https://www.lidl.ch" + pfad); } catch (e) { console.error("Lidl", pfad, e); continue; }
+    for (const m of html.matchAll(/data-grid-data="([^"]*)"/g)) {
+      let d: Record<string, any>;
+      try { d = JSON.parse(m[1].replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#0?39;/g, "'").replace(/&amp;/g, "&")); }
+      catch { continue; }
+      const titel = d.fullTitle || d.title;
+      if (!titel || !d.productId) continue;
+      const plus = d.lidlPlus?.[0];
+      const preis = d.price?.price ?? plus?.price?.price ?? null;
+      const alt = d.price?.oldPrice ?? d.price?.discount?.deletedPrice ?? plus?.price?.oldPrice ?? null;
+      let rabatt = d.price?.discount?.discountText || "";
+      if (!d.price?.price && plus) rabatt = `Lidl Plus ${plus.highlightText || plus.price?.discount?.discountText || ""}`.trim();
+      const kat = String(d.keyfacts?.wonCategoryPrimary || "").split("/");
+      angebote.push({
+        quelle_id: String(d.productId),
+        name: ent(String(titel)),
+        beschreibung: ohneHtml(d.keyfacts?.description || "") || null,
+        preis: typeof preis === "number" ? preis : zahl(preis),
+        preis_alt: (typeof alt === "number" ? alt : zahl(alt)) || null,
+        rabatt: rabatt || null,
+        bild_url: d.image || null,
+        kategorie: kat[3] || kat[2] || d.category || null,
+        gueltig_von: tagCH(d.storeStartDate),
+        gueltig_bis: tagCH(d.storeEndDate),
+      });
+    }
+  }
+  return angebote;
+}
+
 /* ---------- Speichern ---------- */
-async function abrufen(laden: "Denner" | "Migros", quelle: string, fn: () => Promise<Angebot[]>) {
+async function abrufen(laden: "Denner" | "Migros" | "Lidl", quelle: string, fn: () => Promise<Angebot[]>) {
   const { data: abruf, error } = await db.from("aktion_abruf").insert({ laden, quelle }).select().single();
   if (error) throw error;
   try {
@@ -269,6 +318,7 @@ Deno.serve(async (req) => {
   const ergebnis = await Promise.all([
     abrufen("Denner", "denner.ch + aktionis.ch", denner),
     abrufen("Migros", "migros.ch Region Aare", migros),
+    abrufen("Lidl", "lidl.ch", lidl),
   ]);
   // Alte Abrufe (älter als 3 Wochen) aufräumen
   const grenze = new Date(Date.now() - 21 * 864e5).toISOString();
