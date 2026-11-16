@@ -260,7 +260,7 @@ function demoApi() {
   const d = x => JSON.parse(JSON.stringify(x));
   const later = x => new Promise(r => setTimeout(() => r(d(x)), 10));
   return {
-    artikel: () => later(A.filter(a => a.aktiv)),
+    artikel: () => { A.forEach(a => { a.kategorie = dennerKategorie(a.kategorie, a.name); }); return later(A.filter(a => a.aktiv)); },
     artikelNeu: o => { const a = Object.assign({ id: ++nid, aktiv: true, laeden: [], bemerkung: null }, o); A.push(a); return later(a); },
     artikelAendern: (id, o) => { const a = A.find(x => x.id === id); Object.assign(a, o); return later(a); },
     offenerEinkauf: () => later(E.find(e => !e.abgeschlossen_am) || null),
@@ -279,10 +279,10 @@ function demoApi() {
     aktionen: () => later([
       { id: 501, laden: 'Denner', name: 'Barilla Spaghetti n. 5', beschreibung: '500 g', preis: 1.95, preis_alt: 2.95, rabatt: '33%', kategorie: 'Vorräte', gueltig_von: '2026-11-19', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
       { id: 502, laden: 'Denner', name: 'Broccoli', beschreibung: 'Spanien, per kg', preis: 2.5, preis_alt: 4, rabatt: '37%', kategorie: 'Früchte und Gemüse', gueltig_von: '2026-11-19', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
-      { id: 503, laden: 'Migros', name: 'M-Classic gehackte Tomaten, 3 x 280 g', beschreibung: 'Angebot gilt nur vom 18.11. bis 24.11.2026', preis: 2.4, preis_alt: 3.6, rabatt: '33%', kategorie: null, gueltig_von: '2026-11-18', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
+      { id: 503, laden: 'Migros', name: 'M-Classic gehackte Tomaten, 3 x 280 g', beschreibung: 'Angebot gilt nur vom 18.11. bis 24.11.2026', preis: 2.4, preis_alt: 3.6, rabatt: '33%', kategorie: 'Pasta, Würzmittel & Konserven', gueltig_von: '2026-11-18', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
       { id: 505, laden: 'Migros', name: 'Frey Schokolade Milch, 5 x 100 g', beschreibung: '5 x 100 g', preis: 6.5, preis_alt: 10.5, rabatt: '38%', kategorie: 'Süsses', gueltig_von: '2026-11-12', gueltig_bis: '2026-11-25', abgerufen_am: new Date().toISOString() },
       { id: 506, laden: 'Lidl', name: 'Rispentomaten', beschreibung: '500 g', preis: 1.49, preis_alt: 2.29, rabatt: '-34%', kategorie: 'Gemüse', gueltig_von: '2026-11-19', gueltig_bis: null, abgerufen_am: new Date().toISOString() },
-      { id: 504, laden: 'Migros', name: 'Blumenkohl', beschreibung: 'Schweiz, per Stück', preis: 2.95, preis_alt: 4.2, rabatt: '30%', kategorie: null, gueltig_von: '2026-11-18', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
+      { id: 504, laden: 'Migros', name: 'Blumenkohl', beschreibung: 'Schweiz, per Stück', preis: 2.95, preis_alt: 4.2, rabatt: '30%', kategorie: 'Früchte & Gemüse', gueltig_von: '2026-11-18', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
     ]),
     aktionenAktualisieren: () => later({ ergebnis: [] }),
     verlauf: () => { const t = d => new Date(Date.now() - d * 864e5).toISOString(); return later([
@@ -302,7 +302,47 @@ const S = {
 };
 const posFor = id => S.pos.find(p => p.artikel_id === id);
 const artById = id => S.artikel.find(a => a.id === id);
-const kategorien = () => [...new Set(S.artikel.map(a => a.kategorie).filter(Boolean).concat(S.pos.map(p => p.kategorie).filter(Boolean)).concat(['Andere']))].sort((x, y) => (x === 'Andere') - (y === 'Andere') || coll.compare(x, y));
+// Kategorien wie bei Denner (Lebensmittel, Getränke, Non-Food), in dieser Reihenfolge
+const KATEGORIEN = ['Früchte und Gemüse', 'Fleisch/Wurst/Fisch', 'Milch/Käse/Eier', 'Brot/Backwaren', 'Fertigprodukte', 'Tiefkühlprodukte',
+  'Sonstiges', 'Schokolade/Süsses', 'Snack/Apero', 'Kaffee/Tee/Kakao', 'Getränke/Säfte', 'Bier', 'Wein/Champagner',
+  'Pflege/Kosmetik', 'Waschen/Haushalt', 'Andere'];
+const NON_FOOD = new Set(['Pflege/Kosmetik', 'Waschen/Haushalt', 'Andere']);
+const katRang = k => { const i = KATEGORIEN.indexOf(k); return i < 0 ? KATEGORIEN.length : i; };
+const katSort = (x, y) => katRang(x) - katRang(y) || coll.compare(x || 'zzz', y || 'zzz');
+const kategorien = () => [...new Set(KATEGORIEN.concat(S.artikel.map(a => a.kategorie).filter(Boolean), S.pos.map(p => p.kategorie).filter(Boolean)))].sort(katSort);
+// Ordnet eine Ladenkategorie (Migros, Lidl, alte eigene) einer Denner-Kategorie zu
+function dennerKategorie(kat, name) {
+  const k = String(kat || '').toLowerCase(), n = String(name || '').toLowerCase();
+  if (KATEGORIEN.includes(kat)) return kat;
+  const r = [
+    [/tierbedarf|katzen|hunde|bekleidung|mode|spiel|hobby|garten|deko|wohn|schlaf|küche & wohn|küchenger|multimedia|elektro|papeterie|blumen|heizen|sport|kinderzimmer|werkzeug|hidden/, 'Andere'],
+    [/beauty|gesundheit|pflege|kosmetik|zahn|badezimmer|baby und kind/, 'Pflege/Kosmetik'],
+    [/reinigung|wasch|haushalt|hygienepapier/, 'Waschen/Haushalt'],
+    [/tiefkühl|glace/, 'Tiefkühlprodukte'],
+    [/^wein, bier/, /bier|lager|ale\b|cider/.test(n) ? 'Bier' : 'Wein/Champagner'],
+    [/bier|cider/, 'Bier'],
+    [/(rot|weiss|weiß|rosé|schaum)wein|^wein|weinpaket|champagner|sekt|prosecco|spirituos/, 'Wein/Champagner'],
+    [/^getränke, kaffee/, /kaffee|tee\b|tee |kakao|espresso|caf|capsul|kapsel/.test(n) ? 'Kaffee/Tee/Kakao' : 'Getränke/Säfte'],
+    [/kaffee|tee|kakao/, 'Kaffee/Tee/Kakao'],
+    [/softdrink|saft|säfte|wasser|getränk/, 'Getränke/Säfte'],
+    [/^snacks & süss/, /chips|nüss|nuss|apéro|apero|cracker|salzst|popcorn|flips|brezel/.test(n) ? 'Snack/Apero' : 'Schokolade/Süsses'],
+    [/trockenobst|nüsse|herzhafte snacks|snack|apero/, 'Snack/Apero'],
+    [/schoko|süss|süß|bonbon|fruchtgummi|kekse|dessert/, 'Schokolade/Süsses'],
+    [/konserve|pasta, würz|reis|nudel|hülsen|sauce|soße|würz|gewürz|kräuter|öl|fett|essig|marmelade|aufstrich|honig|suppe|backen|teigwaren|trockenware/, 'Sonstiges'],
+    [/fleisch|fisch|wurst|aufschnitt|geflügel|rind|schwein|meeresfr/, 'Fleisch/Wurst/Fisch'],
+    [/früchte|gemüse|obst|frischware/, 'Früchte und Gemüse'],
+    [/^milchprodukte/, /sandwich|salat|pizza|wrap|menü|lasagne|curry|bowl|suppe|ravioli|gnocchi|wähe|quiche/.test(n) ? 'Fertigprodukte' : 'Milch/Käse/Eier'],
+    [/fertiggericht|feinkost|antipasti|frische pasta/, 'Fertigprodukte'],
+    [/käse|milch|joghurt|butter|eier|sahne|kühlprodukte/, 'Milch/Käse/Eier'],
+    [/^brot, backwaren/, /müesli|muesli|flakes|cornflakes|konfi|honig|aufstrich/.test(n) ? 'Sonstiges' : 'Brot/Backwaren'],
+    [/brot|backwaren|brötchen|toast|gebäck/, 'Brot/Backwaren'],
+    [/frühstück/, 'Sonstiges'],
+  ];
+  for (const [re, ziel] of r) if (re.test(k)) return ziel;
+  return k ? 'Sonstiges' : 'Andere';
+}
+const katAuswahl = (id, wert) => { const w = wert ? dennerKategorie(wert) : ''; return `<select id="${id}"><option value="">– wählen –</option>${KATEGORIEN.map(k => `<option ${k === w ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>`; };
+const aktionenNormalisiert = liste => liste.map(x => ({ ...x, kategorie: dennerKategorie(x.kategorie, x.name) }));
 
 /* ---------- Einkaufslogik ---------- */
 // Grundmenge ohne Wochenanpassung
@@ -427,7 +467,7 @@ function renderEinkaufen(main) {
   for (const l of LAEDEN.concat([OHNE_LADEN])) {
     const its = g.get(l); if (!its) continue;
     html += `<h2>${ladenPill(l)} <span class="sum">${its.filter(i => !(i.p && i.p.gekauft)).length} offen</span>${admin ? `<button class="btn small" data-kopieren="${esc(l)}" style="margin-left:auto">Kopieren</button>` : ''}</h2><div class="card">`;
-    for (const i of its.sort((x, y) => coll.compare(x.kategorie, y.kategorie) || coll.compare(x.name, y.name))) html += einkaufZeile(i, admin);
+    for (const i of its.sort((x, y) => katSort(x.kategorie, y.kategorie) || coll.compare(x.name, y.name))) html += einkaufZeile(i, admin);
     html += `</div>`;
   }
   if (admin && entfernt.length) {
@@ -634,7 +674,7 @@ function textListe(items) {
   for (const l of LAEDEN.concat([OHNE_LADEN])) {
     const its = g.get(l); if (!its) continue;
     t.push(l.toUpperCase());
-    its.sort((x, y) => coll.compare(x.kategorie, y.kategorie) || coll.compare(x.name, y.name))
+    its.sort((x, y) => katSort(x.kategorie, y.kategorie) || coll.compare(x.name, y.name))
       .forEach(i => t.push(`- ${fmt(i.menge)}× ${i.name}`));
     t.push('');
   }
@@ -667,7 +707,7 @@ function hinzufuegenDialog() {
       ${aufListe.has(a.id) ? '<span class="tag">auf Liste</span>' : `<button class="btn small" data-art="${a.id}">+</button>`}</div>`;
     if (!q && zus.length) {
       h += `<div class="result"><h3 style="margin:0">Früher hinzugefügt</h3></div>`;
-      const g = gruppiere(zus.sort((x, y) => coll.compare(x.kategorie || OHNE_KAT, y.kategorie || OHNE_KAT)), f => f.kategorie || OHNE_KAT);
+      const g = gruppiere(zus.sort((x, y) => katSort(x.kategorie, y.kategorie)), f => f.kategorie || OHNE_KAT);
       for (const [k, fs] of g) h += `<div class="result"><div class="main"><div class="meta">${esc(k)}</div><div class="opts" style="margin-top:4px">${fs.map(f => `<button class="chip" data-frueher="${esc(f.freitext)}">+ ${esc(f.freitext)}</button>`).join('')}</div></div></div>`;
     } else if (q) {
       for (const f of zus.slice(0, 10)) h += `<div class="result"><div class="main"><div class="name">${esc(f.freitext)}</div><div class="meta">früher hinzugefügt · ${esc(f.kategorie || '')}</div></div><button class="btn small" data-frueher="${esc(f.freitext)}">+</button></div>`;
@@ -699,8 +739,7 @@ function zusatzDialog(name, kat, laden, danach) {
       <div class="field"><label for="zMenge">Menge</label><input type="number" id="zMenge" min="1" value="1" inputmode="numeric"></div>
       <div class="field"><label for="zLaden">Laden</label><select id="zLaden">${LAEDEN.map(l => `<option ${l === (laden || 'Migros') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
     </div>
-    <div class="field"><label for="zKat">Kategorie</label><input type="text" id="zKat" list="katListe" value="${esc(kat || '')}" placeholder="z. B. Gemüse"><div class="hint">Unter dieser Kategorie kannst du den Artikel nächstes Mal wieder ankreuzen.</div></div>
-    <datalist id="katListe">${kategorien().map(k => `<option value="${esc(k)}">`).join('')}</datalist>
+    <div class="field"><label for="zKat">Kategorie</label>${katAuswahl('zKat', kat)}<div class="hint">Unter dieser Kategorie kannst du den Artikel nächstes Mal wieder ankreuzen.</div></div>
     <div class="err" id="zErr"></div>
     <div class="actions"><button class="btn" data-close>Abbrechen</button><button class="btn primary" id="zOk">Hinzufügen</button></div>`);
   $('#zOk', ov).onclick = async () => {
@@ -828,8 +867,7 @@ function renderAktionen(main) {
   } else if (S.akFilter !== 'meine' && meine.length) html += block('Passt zu deinen Artikeln', meine);
   else if (S.akFilter === 'meine') html += block('Passt zu deinen Artikeln', meine);
   if (!q && S.akFilter !== 'meine') {
-    const nonFood = k => /bekleidung|baby|kind|spiel|hobby|beauty|gesundheit|wohn|garten|elektron|sport|tier|blumen|freizeit|reise|multimedia|schuh|accessoires|sonstiges/i.test(k || '') ? 1 : 0;
-    const sortiert = arr => arr.sort((x, y) => (nonFood(x.kategorie) - nonFood(y.kategorie)) || coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name));
+    const sortiert = arr => arr.sort((x, y) => katSort(x.kategorie, y.kategorie) || coll.compare(x.name, y.name));
     const neuSet = new Set(w.neu), restNeu = rest.filter(x => neuSet.has(x)), restLauf = rest.filter(x => !neuSet.has(x));
     for (const [k, its] of gruppiere(sortiert(restNeu), x => x.kategorie || 'Weitere Aktionen')) html += block(k, its);
     if (restLauf.length) {
@@ -852,7 +890,7 @@ function renderAktionen(main) {
   s.oninput = () => { S.akSuche = s.value; const pos = s.selectionStart; render(); const n = $('#akSuche'); n.focus(); n.setSelectionRange(pos, pos); };
   $('#akNeu').onclick = async () => {
     const b = $('#akNeu'); b.disabled = true; b.textContent = 'Lädt … (ca. 30 s)';
-    try { await S.api.aktionenAktualisieren(); S.aktionen = await S.api.aktionen(); toast('Aktionen aktualisiert.'); }
+    try { await S.api.aktionenAktualisieren(); S.aktionen = aktionenNormalisiert(await S.api.aktionen()); toast('Aktionen aktualisiert.'); }
     catch (e) { fehler(e); }
     render();
   };
@@ -894,7 +932,7 @@ async function aktionMenge(ak, d) {
       else S.pos.push(await S.api.positionNeu(Object.assign({ einkauf_id: S.einkauf.id, artikel_id: a.id }, werte)));
       toast(`«${a.name}» als Aktion auf der Liste (${werte.menge_fix}).`);
     } else {
-      S.pos.push(await S.api.positionNeu({ einkauf_id: S.einkauf.id, freitext: ak.name, kategorie: ak.kategorie || 'Aktion', laden: ak.laden, in_aktion: true, aktion_id: ak.id, menge_fix: 1 }));
+      S.pos.push(await S.api.positionNeu({ einkauf_id: S.einkauf.id, freitext: ak.name, kategorie: ak.kategorie || 'Sonstiges', laden: ak.laden, in_aktion: true, aktion_id: ak.id, menge_fix: 1 }));
       toast(`«${ak.name}» auf der Liste.`);
     }
   } catch (e) { fehler(e); }
@@ -995,7 +1033,7 @@ function renderArtikel(main) {
       <button class="btn small" id="minUmschalten" style="margin-left:6px">${minZeigen ? 'Minimum ausblenden' : 'Minimum einblenden'}</button>` : 'Bestand mit − / + anpassen, wenn etwas aufgebraucht oder dazugekommen ist. Das wird sofort gespeichert.'}</p>`;
   if (admin && !q) html += unterMinBlock();
   if (!arts.length) html += `<div class="card"><div class="empty">Keine Artikel gefunden.</div></div>`;
-  const g = gruppiere(arts.sort((x, y) => coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)), a => a.kategorie || OHNE_KAT);
+  const g = gruppiere(arts.sort((x, y) => katSort(x.kategorie, y.kategorie) || coll.compare(x.name, y.name)), a => a.kategorie || OHNE_KAT);
   for (const [kat, as] of g) {
     html += `<h2>${esc(kat)} <span class="sum">${as.length}</span></h2><div class="card">`;
     for (const a of as) {
@@ -1045,8 +1083,7 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
   const ov = dialog(`<h2>${neu ? 'Neuer Artikel' : 'Artikel bearbeiten'}</h2>
     <form id="aForm" novalidate>
     <div class="field"><label for="fName">Name *</label><input type="text" id="fName" value="${esc(v.name || '')}" placeholder="z. B. M-Classic Thon"></div>
-    <div class="field"><label for="fKat">Kategorie *</label><input type="text" id="fKat" list="katListe2" value="${esc(v.kategorie || '')}" placeholder="Auswählen oder neue eintippen">
-      <datalist id="katListe2">${kategorien().map(k => `<option value="${esc(k)}">`).join('')}</datalist></div>
+    <div class="field"><label for="fKat">Kategorie *</label>${katAuswahl('fKat', v.kategorie)}</div>
     <div class="field"><div class="lbl">Erhältlich bei</div><div class="opts">${LAEDEN.map(l => `<label class="opt"><input type="checkbox" name="laeden" value="${esc(l)}" ${(v.laeden || []).includes(l) ? 'checked' : ''}>${esc(l)}</label>`).join('')}</div></div>
     <div class="field"><label for="fStd">Standardladen *</label><select id="fStd"><option value="">– wählen –</option>${LAEDEN.map(l => `<option ${l === v.standardladen ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
       <div class="hint">Dort landet der Artikel automatisch auf der Liste.</div></div>
@@ -1125,7 +1162,7 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
 function exportCsv() {
   const kopf = ['Produkt', ...LAEDEN, 'Standardladen', 'Nur in Aktion', 'Routine', 'Routine-Menge / Woche', 'Bestand aktuell', 'Mindestbestand', 'Kategorie', 'Bemerkung'];
   const zelle = v => { const s = v === null || v === undefined ? '' : String(v); return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-  const zeilen = S.artikel.slice().sort((x, y) => coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)).map(a => [
+  const zeilen = S.artikel.slice().sort((x, y) => katSort(x.kategorie, y.kategorie) || coll.compare(x.name, y.name)).map(a => [
     a.name, ...LAEDEN.map(l => (a.laeden || []).includes(l) ? 'x' : ''), a.standardladen, a.nur_aktion ? 'ja' : 'nein', a.routine ? 'ja' : 'nein',
     a.routine_menge, fmt(a.bestand), fmt(a.mindestbestand), a.kategorie, a.bemerkung]);
   const csv = '﻿' + [kopf, ...zeilen].map(r => r.map(zelle).join(';')).join('\r\n');
@@ -1166,7 +1203,7 @@ async function laden() {
     const [artikel, einkaufAlt, frueher] = await Promise.all([S.api.artikel(), S.api.offenerEinkauf(), S.api.fruehereZusatz()]);
     S.artikel = artikel; S.frueher = frueher || [];
     if (S.modus !== 'einkauf') {
-      try { S.aktionen = await S.api.aktionen(); } catch (e) { S.aktionen = []; console.error(e); }
+      try { S.aktionen = aktionenNormalisiert(await S.api.aktionen()); } catch (e) { S.aktionen = []; console.error(e); }
       try { S.verlauf = await S.api.verlauf(); } catch (e) { S.verlauf = []; console.error(e); }
     }
     S.einkauf = einkaufAlt || await S.api.einkaufNeu();
