@@ -280,6 +280,8 @@ function demoApi() {
       { id: 501, laden: 'Denner', name: 'Barilla Spaghetti n. 5', beschreibung: '500 g', preis: 1.95, preis_alt: 2.95, rabatt: '33%', kategorie: 'Vorräte', gueltig_von: '2026-11-19', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
       { id: 502, laden: 'Denner', name: 'Broccoli', beschreibung: 'Spanien, per kg', preis: 2.5, preis_alt: 4, rabatt: '37%', kategorie: 'Früchte und Gemüse', gueltig_von: '2026-11-19', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
       { id: 503, laden: 'Migros', name: 'M-Classic gehackte Tomaten, 3 x 280 g', beschreibung: 'Angebot gilt nur vom 18.11. bis 24.11.2026', preis: 2.4, preis_alt: 3.6, rabatt: '33%', kategorie: null, gueltig_von: '2026-11-18', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
+      { id: 505, laden: 'Migros', name: 'Frey Schokolade Milch, 5 x 100 g', beschreibung: '5 x 100 g', preis: 6.5, preis_alt: 10.5, rabatt: '38%', kategorie: 'Süsses', gueltig_von: '2026-11-12', gueltig_bis: '2026-11-25', abgerufen_am: new Date().toISOString() },
+      { id: 506, laden: 'Lidl', name: 'Rispentomaten', beschreibung: '500 g', preis: 1.49, preis_alt: 2.29, rabatt: '-34%', kategorie: 'Gemüse', gueltig_von: '2026-11-19', gueltig_bis: null, abgerufen_am: new Date().toISOString() },
       { id: 504, laden: 'Migros', name: 'Blumenkohl', beschreibung: 'Schweiz, per Stück', preis: 2.95, preis_alt: 4.2, rabatt: '30%', kategorie: null, gueltig_von: '2026-11-18', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
     ]),
     aktionenAktualisieren: () => later({ ergebnis: [] }),
@@ -296,7 +298,7 @@ function demoApi() {
 /* ---------- Zustand ---------- */
 const S = {
   api: null, artikel: [], einkauf: null, pos: [], frueher: [],
-  tab: 'einkaufen', suche: '', filter: 'alle', laden: 'alle', ekLaden: 'alle', aktionen: [], akLaden: 'Denner', akSuche: '', akFilter: 'alle',
+  tab: 'einkaufen', suche: '', filter: 'alle', laden: 'alle', ekLaden: 'alle', aktionen: [], akLaden: 'Denner', akWoche: 0, akSuche: '', akFilter: 'alle',
 };
 const posFor = id => S.pos.find(p => p.artikel_id === id);
 const artById = id => S.artikel.find(a => a.id === id);
@@ -760,23 +762,24 @@ function passenderArtikel(ak) {
   ak._match = best;
   return best;
 }
-// Aktionen einer Woche je Laden: die, die in der Woche vor dem Einkaufsdonnerstag beginnen und am Donnerstag gelten.
-// Sind die neuen noch nicht veröffentlicht: die aktuell laufende Woche (mit Hinweis). Ohne Datum: separat.
+// Aktionen je Laden für einen Einkaufsdonnerstag (Woche 0 = kommender, 1 = Folgewoche):
+// alle, die an diesem Donnerstag gelten. "neu" = in dieser Woche gestartet, "laufend" = schon früher gestartet.
 const plusTage = (iso, n) => { const d = new Date(iso + 'T12:00'); d.setDate(d.getDate() + n); return isoLokal(d); };
-const haeufigster = werte => { const m = new Map(); werte.filter(Boolean).forEach(v => m.set(v, (m.get(v) || 0) + 1)); return [...m.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]?.[0] || null; };
-function wocheAktionen(laden) {
-  const tag = einkaufstag(), heute = heuteIso();
+const stichtagWoche = w => plusTage(einkaufstag(), 7 * (w || 0));
+function wocheAktionen(laden, woche = S.akWoche) {
+  const tag = stichtagWoche(woche), start = plusTage(tag, -6);
   const alle = S.aktionen.filter(x => x.laden === laden);
-  const inWoche = (stichtag) => alle.filter(x => x.gueltig_von && x.gueltig_von > plusTage(stichtag, -7) && x.gueltig_von <= stichtag && (!x.gueltig_bis || x.gueltig_bis >= stichtag));
-  let items = inWoche(tag), vorschau = false;
-  if (!items.length) { items = inWoche(heute); vorschau = true; }
-  return { items, vorschau, ab: haeufigster(items.map(x => x.gueltig_von)), bis: haeufigster(items.map(x => x.gueltig_bis)), ohneDatum: alle.filter(x => !x.gueltig_von) };
+  const bis = x => x.gueltig_bis || plusTage(x.gueltig_von, 6);
+  const items = alle.filter(x => x.gueltig_von && x.gueltig_von <= tag && bis(x) >= tag);
+  const neu = items.filter(x => x.gueltig_von >= start), laufend = items.filter(x => x.gueltig_von < start);
+  return { tag, items, neu, laufend, ohneDatum: alle.filter(x => !x.gueltig_von && (x.preis_alt || x.rabatt)) };
 }
-function wochenAktionenAlle() { return ['Migros', 'Denner', 'Lidl'].flatMap(l => wocheAktionen(l).items); }
+const haeufigsterVon = items => { const m = new Map(); items.forEach(x => m.set(x.gueltig_von, (m.get(x.gueltig_von) || 0) + 1)); return [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null; };
+function wochenAktionenAlle(woche = S.akWoche) { return ['Migros', 'Denner', 'Lidl'].flatMap(l => wocheAktionen(l, woche).items); }
 
 function aktionFuer(a) {
   if (!a) return null;
-  return wochenAktionenAlle().find(ak => passenderArtikel(ak) === a) || null;
+  return wochenAktionenAlle(0).find(ak => passenderArtikel(ak) === a) || null;
 }
 function oftGekauft(a) { const e = kaufrhythmus().get('a' + a.id); return !!(e && e.anzahl >= 2); }
 function aktionPosition(ak) {
@@ -785,22 +788,25 @@ function aktionPosition(ak) {
 const chf = n => isNum(n) ? n.toFixed(2) : (n ? String(n) : '');
 
 function renderAktionen(main) {
-  const tag = einkaufstag();
+  const tag = stichtagWoche(S.akWoche);
   const zeit = S.aktionen.length ? new Date(Math.max(...S.aktionen.map(x => new Date(x.abgerufen_am).getTime()))) : null;
   const q = S.akSuche.trim().toLowerCase();
   const w = wocheAktionen(S.akLaden);
   const sm = suchMuster(q);
-  // Mit Suchbegriff: über alle Läden suchen (jeweils nur die gezeigte Woche)
+  // Mit Suchbegriff: über alle Läden suchen (jeweils die gewählte Woche)
   let liste = q ? wochenAktionenAlle().filter(x => passtSuche(x.name + ' ' + (x.beschreibung || '') + ' ' + (x.kategorie || ''), sm)) : w.items;
   if (S.akFilter === 'meine') liste = liste.filter(x => passenderArtikel(x));
   if (S.akFilter === 'liste') liste = liste.filter(x => aktionPosition(x));
-  const abText = w.ab ? `gültig ab ${datumLang(w.ab)}${w.bis ? ' bis ' + datumKurz(w.bis) : ''}` : '';
-  let html = `<div class="chips">${['Migros', 'Denner', 'Lidl'].map(l => `<button class="chip" data-akl="${l}" aria-pressed="${S.akLaden === l}">${l} (${wocheAktionen(l).items.length})</button>`).join('')}</div>
-    <div class="wochenkopf${w.vorschau ? ' alt' : ''}">
-      ${q ? `<div class="wk-gross">Suche in allen Läden</div><div class="wk-klein">für den Einkauf am ${esc(datumLang(tag))}</div>`
-          : w.items.length ? `<div class="wk-gross">${esc(S.akLaden)}-Aktionen ${esc(abText)}</div>
-              <div class="wk-klein">${w.vorschau ? `Achtung: Das sind noch die aktuellen Aktionen. Die neuen für den Einkauf am ${esc(datumLang(tag))} sind noch nicht veröffentlicht${S.akLaden === 'Migros' ? ' (meist Dienstag/Mittwoch)' : ' (meist Dienstag)'}.` : `für deinen Einkauf am ${esc(datumLang(tag))}`}</div>`
-          : `<div class="wk-gross">Keine ${esc(S.akLaden)}-Aktionen geladen</div>`}
+  const erscheint = { Denner: 'Denner veröffentlicht sie jeweils am Dienstag', Migros: 'Migros veröffentlicht sie jeweils am Mittwoch', Lidl: 'Lidl veröffentlicht sie meist am Wochenende davor' }[S.akLaden];
+  const fehltNeu = !w.neu.length;
+  let html = `<div class="chips">${[0, 1].map(k => `<button class="chip" data-akw="${k}" aria-pressed="${S.akWoche === k}">${k ? 'Folgewoche' : 'Kommende Woche'} · Do ${datumKurz(stichtagWoche(k))}</button>`).join('')}</div>
+    <div class="chips">${['Migros', 'Denner', 'Lidl'].map(l => `<button class="chip" data-akl="${l}" aria-pressed="${S.akLaden === l}">${l} (${wocheAktionen(l).items.length})</button>`).join('')}</div>
+    <div class="wochenkopf${!q && fehltNeu ? ' alt' : ''}">
+      ${q ? `<div class="wk-gross">Suche in allen Läden</div><div class="wk-klein">Aktionen gültig am ${esc(datumLang(tag))}</div>`
+          : `<div class="wk-gross">${esc(S.akLaden)}-Aktionen gültig am ${esc(datumLang(tag))}</div>
+             <div class="wk-klein">${fehltNeu
+                ? `Die neuen Aktionen ab ${esc(datumKurz(tag))} sind noch nicht veröffentlicht (${erscheint}).${w.laufend.length ? ` Unten: ${w.laufend.length} laufende Aktionen, die an diesem Tag noch gelten.` : ''}`
+                : `${w.neu.length} neu ab ${esc(datumKurz(haeufigsterVon(w.neu) || tag))}${w.laufend.length ? ` · ${w.laufend.length} laufen weiter` : ''}`}</div>`}
     </div>
     <input class="search" id="akSuche" placeholder="In allen Aktionen suchen, z. B. Schoko …" value="${esc(S.akSuche)}" autocomplete="off">
     <div class="chips">${[['alle', 'Alle'], ['meine', 'Passt zu meinen Artikeln'], ['liste', 'Auf der Liste']].map(([k, t]) => `<button class="chip" data-akf="${k}" aria-pressed="${S.akFilter === k}">${t}</button>`).join('')}</div>
@@ -823,17 +829,24 @@ function renderAktionen(main) {
   else if (S.akFilter === 'meine') html += block('Passt zu deinen Artikeln', meine);
   if (!q && S.akFilter !== 'meine') {
     const nonFood = k => /bekleidung|baby|kind|spiel|hobby|beauty|gesundheit|wohn|garten|elektron|sport|tier|blumen|freizeit|reise|multimedia|schuh|accessoires|sonstiges/i.test(k || '') ? 1 : 0;
-    const g = gruppiere(rest.sort((x, y) => (nonFood(x.kategorie) - nonFood(y.kategorie)) || coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)), x => x.kategorie || 'Weitere Aktionen');
-    for (const [k, its] of g) html += block(k, its);
+    const sortiert = arr => arr.sort((x, y) => (nonFood(x.kategorie) - nonFood(y.kategorie)) || coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name));
+    const neuSet = new Set(w.neu), restNeu = rest.filter(x => neuSet.has(x)), restLauf = rest.filter(x => !neuSet.has(x));
+    for (const [k, its] of gruppiere(sortiert(restNeu), x => x.kategorie || 'Weitere Aktionen')) html += block(k, its);
+    if (restLauf.length) {
+      const offen = !restNeu.length ? ' open' : '';
+      html += `<h2>Laufende Aktionen <span class="sum">${restLauf.length}</span></h2>
+        <details class="card"${offen}><summary>Schon früher gestartet, am ${esc(datumLang(tag))} noch gültig</summary><div class="rows">${sortiert(restLauf).map(aktionZeile).join('')}</div></details>`;
+    }
   }
   if (!q && S.akFilter === 'alle' && w.ohneDatum.length) {
     html += `<h2>Weitere ${esc(S.akLaden)}-Aktionen <span class="sum">${w.ohneDatum.length}</span></h2>
-      <details class="card"><summary>Ohne Datumsangabe (von aktionis.ch) – Gültigkeit im Laden prüfen</summary><div class="rows">${w.ohneDatum.sort((x, y) => coll.compare(x.name, y.name)).map(aktionZeile).join('')}</div></details>`;
+      <details class="card"><summary>Ohne Datumsangabe – Gültigkeit im Laden prüfen</summary><div class="rows">${w.ohneDatum.sort((x, y) => coll.compare(x.name, y.name)).map(aktionZeile).join('')}</div></details>`;
   }
-  html += `<p class="sum" style="margin-top:14px">Quellen: Migros von migros.ch (Region Aare), Denner von denner.ch und aktionis.ch, Lidl von lidl.ch. Verfügbarkeit im Laden kann abweichen.</p>`;
+  html += `<p class="sum" style="margin-top:14px">Quellen: Migros von migros.ch (Region Aare), Denner von denner.ch, Lidl von lidl.ch. Verfügbarkeit im Laden kann abweichen.</p>`;
   main.innerHTML = html;
 
   main.querySelectorAll('[data-akl]').forEach(b => b.onclick = () => { S.akLaden = b.dataset.akl; render(); });
+  main.querySelectorAll('[data-akw]').forEach(b => b.onclick = () => { S.akWoche = Number(b.dataset.akw); render(); });
   main.querySelectorAll('[data-akf]').forEach(b => b.onclick = () => { S.akFilter = b.dataset.akf; render(); });
   const s = $('#akSuche');
   s.oninput = () => { S.akSuche = s.value; const pos = s.selectionStart; render(); const n = $('#akSuche'); n.focus(); n.setSelectionRange(pos, pos); };

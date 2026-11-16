@@ -1,4 +1,4 @@
-// Holt die Wochenaktionen von Denner (denner.ch + aktionis.ch), Migros (migros.ch, Region Aare; Notfall aktionis.ch) und Lidl (lidl.ch)
+// Holt die Wochenaktionen von Denner (denner.ch; Notfall aktionis.ch), Migros (migros.ch, Region Aare; Notfall aktionis.ch) und Lidl (lidl.ch)
 // und speichert sie in aktion_abruf / aktion_angebot.
 // Aufruf: zeitgesteuert (Header x-abruf-token) oder von einem Admin der App (Login-Token).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -91,13 +91,62 @@ function dennerSeite(html: string): Angebot[] {
   return angebote;
 }
 const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
-// Denner: zuerst die eigene Seite (zeigt die kommende Woche früh), ergänzt durch aktionis.ch (vollständige Liste)
+// Denner: Schnittstelle der eigenen Webseite (alle Seiten, aktuelle und kommende Woche); Notfall: aktionis.ch
+function dennerAttr(it: Record<string, any>): Record<string, string> {
+  const a: Record<string, string> = {};
+  for (const att of it.attributeInfo || []) a[String(att.attributeName)] = att.vals?.length ? String(att.vals[0]?.value ?? "") : "";
+  return a;
+}
+function dennerAngebot(it: Record<string, any>): Angebot | null {
+  const a = dennerAttr(it);
+  if (!a.name) return null;
+  // Publikationswoche "19.11.–25.11.2026" = Aktionswoche; einzelne Artikel gelten nur an Teilen davon (promotionLabel)
+  const pub = a.promotionLabelPublication?.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})?\s*[–-]\s*(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  const iso = (d: string, m: string, y: string) => `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  const von = pub ? iso(pub[1], pub[2], pub[3] || pub[6]) : tagCH(a.promotionFrom);
+  const echtVon = tagCH(a.promotionFrom), echtBis = tagCH(a.promotionTo);
+  const teil = echtVon && von && echtVon > von && a.promotionLabel ? `nur ${a.promotionLabel}` : "";
+  return {
+    quelle_id: `${a.articleId || it.sku}-${von || ""}`,
+    name: a.name.trim(),
+    beschreibung: [a.nameSubline, teil].filter(Boolean).join(" · ") || null,
+    preis: zahl(a.price),
+    preis_alt: zahl(a.insteadPriceText),
+    rabatt: a.discount_text || null,
+    bild_url: a.thumbnailUrl || a.imageUrl || null,
+    kategorie: a._tracking_item_category2 || null,
+    gueltig_von: von,
+    gueltig_bis: echtBis || (pub ? iso(pub[4], pub[5], pub[6]) : null),
+  };
+}
+async function dennerApi(): Promise<Angebot[]> {
+  const alle: Angebot[] = [];
+  for (const flag of ["promo_next_week", "promo_current_week"]) {
+    for (let seite = 1, seiten = 1; seite <= seiten && seite <= 15; seite++) {
+      const r = await fetch("https://www.denner.ch/nuxt-api/promotions", {
+        method: "POST",
+        headers: { "User-Agent": UA, "Content-Type": "application/json", "Accept": "application/json", "Origin": "https://www.denner.ch", "Referer": "https://www.denner.ch/de/aktionen/aktionen-ab-donnerstag" },
+        body: JSON.stringify({ lang: "de", promoFlag: flag, facetName: null, facetValue: null, page: seite, hitsPerPage: 100, sort: null, includeHighlights: seite === 1 }),
+      });
+      if (!r.ok) throw new Error(`Denner ${flag}: HTTP ${r.status}`);
+      const j = await r.json();
+      seiten = Number(j?.stats?.totalPages) || 1;
+      const items = [...(j.items || []), ...((j.highlights || []).flatMap((h: Record<string, any>) => h.items || []))];
+      for (const it of items) { const x = dennerAngebot(it); if (x) alle.push(x); }
+    }
+  }
+  return alle;
+}
 async function denner(): Promise<Angebot[]> {
+  try {
+    const a = await dennerApi();
+    if (a.length) return a;
+  } catch (e) { console.error("Denner API", e); }
+  // Notfall: eigene Seite (nur erste Artikel) + aktionis.ch
   let direkt: Angebot[] = [];
-  try { direkt = dennerSeite(await holen("https://www.denner.ch/de/aktionen/aktionen-ab-donnerstag")); }
-  catch (e) { console.error("Denner direkt", e); }
+  try { direkt = dennerSeite(await holen("https://www.denner.ch/de/aktionen/aktionen-ab-donnerstag")); } catch (e) { console.error("Denner Seite", e); }
   let weitere: Angebot[] = [];
-  try { weitere = await aktionis("denner", /denner/i); } catch (e) { console.error("Denner aktionis", e); if (!direkt.length) throw e; }
+  try { weitere = await aktionis("denner", /denner/i); } catch (e) { if (!direkt.length) throw e; }
   const namen = new Set(direkt.map((a) => norm(a.name)));
   return [...direkt, ...weitere.filter((a) => !namen.has(norm(a.name))).map((a) => ({ ...a, quelle_id: "ak" + a.quelle_id }))];
 }
@@ -244,10 +293,12 @@ const ohneHtml = (s: string) => {
 };
 async function lidl(): Promise<Angebot[]> {
   const start = await holen("https://www.lidl.ch/");
-  const seiten = [...new Set([...start.matchAll(/href="(\/c\/de-CH\/store\/wochenaktion\/a\d+)"/g)].map((m) => m[1]))];
-  if (!seiten.length) throw new Error("Lidl: keine Wochenaktion-Seiten gefunden");
+  // Lebensmittel-Aktionsseiten: Wochenaktion, Super-Wochenende, Neu im Sortiment, Deluxe, Favorina, Lidl Plus
+  const LIDL_SEITEN = /^\/c\/de-CH\/store\/(wochenaktion|super-wochenende|neu-in-unserem-sortiment|deluxe|favorina|lidl-plus-angebote|frische[a-z\-]*|wochenende[a-z\-]*)\/a\d+$/;
+  const seiten = [...new Set([...start.matchAll(/href="(\/c\/de-CH\/store\/[a-z0-9\-]+\/a\d+)"/g)].map((m) => m[1]).filter((p) => LIDL_SEITEN.test(p)))];
+  if (!seiten.some((p) => p.includes("/wochenaktion/"))) throw new Error("Lidl: keine Wochenaktion-Seiten gefunden");
   const angebote: Angebot[] = [];
-  for (const pfad of seiten.slice(0, 6)) {
+  for (const pfad of seiten.slice(0, 14)) {
     let html = "";
     try { html = await holen("https://www.lidl.ch" + pfad); } catch (e) { console.error("Lidl", pfad, e); continue; }
     for (const m of html.matchAll(/data-grid-data="([^"]*)"/g)) {
@@ -316,7 +367,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (!(await berechtigt(req))) return antwort({ fehler: "Keine Berechtigung" }, 401);
   const ergebnis = await Promise.all([
-    abrufen("Denner", "denner.ch + aktionis.ch", denner),
+    abrufen("Denner", "denner.ch", denner),
     abrufen("Migros", "migros.ch Region Aare", migros),
     abrufen("Lidl", "lidl.ch", lidl),
   ]);
