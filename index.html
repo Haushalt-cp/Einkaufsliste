@@ -114,6 +114,10 @@
   .zaehler .zlbl { font-size: 12px; color: var(--muted); margin-right: 4px; }
   .zaehler .iconbtn { border: 1.5px solid var(--line); background: #fff; width: 32px; height: 32px; color: var(--ink); }
   .zaehler .num { width: 44px; padding: 5px 2px; }
+  .zaehler.liste .lzahl { min-width: 30px; text-align: center; font-weight: 700; }
+  .zaehler.liste .iconbtn { border-color: #f3c49a; color: #7a3d00; }
+  .zaehler.liste.aktiv .lzahl { color: #e8730c; }
+  .zaehler.liste .iconbtn:disabled { opacity: .35; }
   .tag.aktion { background: #e2574c; color: #fff; }
   details.card.vorschlag { border-color: #b9d3be; background: #f4f9f4; margin-bottom: 10px; }
   .wochenkopf { background: var(--ink); color: #fff; border-radius: var(--radius); padding: 12px 14px; margin: 4px 0 10px; }
@@ -852,20 +856,42 @@ function zaehlerSpeichern(a, feld, wert, row) {
   if (row) aktualisiereZeile(row, a);
 }
 function aktualisiereZeile(row, a) {
-  row.querySelectorAll('.zaehler').forEach(z => { const inp = $('input', z); if (document.activeElement !== inp) inp.value = fmt(a[z.dataset.feld]).replace(',', '.'); });
+  row.querySelectorAll('.zaehler[data-feld]').forEach(z => { const inp = $('input', z); if (document.activeElement !== inp) inp.value = fmt(a[z.dataset.feld]).replace(',', '.'); });
   const t = $('[data-unter]', row); if (t) t.hidden = grund(a).grund !== 'Nachkaufen' || a.routine;
+}
+
+// Anzahl auf der aktuellen Einkaufsliste (direkt aus dem Vorrat änderbar)
+function listenMenge(a, liste) { const i = (liste || berechneListe().liste).find(x => x.a === a); return i ? i.menge : 0; }
+function listenZaehler(a) {
+  const n = listenMenge(a);
+  return `<div class="zaehler liste${n ? ' aktiv' : ''}"><span class="zlbl">Liste</span>
+    <button class="iconbtn" data-liste="-1" aria-label="Weniger auf die Liste" ${n ? '' : 'disabled'}>−</button>
+    <span class="lzahl">${n}</span>
+    <button class="iconbtn" data-liste="1" aria-label="Mehr auf die Liste">+</button></div>`;
+}
+async function aufListeAendern(a, d, liste) {
+  const item = (liste || []).find(x => x.a === a), p = posFor(a.id);
+  const alt = item ? item.menge : 0, neu = Math.max(0, alt + d);
+  if (neu === alt) return;
+  if (neu === 0) {
+    const automatisch = grund(a).menge > 0 || (p && p.in_aktion && a.nur_aktion);
+    await setzePos({ a, p }, automatisch ? { aufnehmen: false, menge_fix: null } : { aufnehmen: null, menge_fix: null, in_aktion: false });
+    toast(`«${a.name}» von der Liste genommen.`);
+  } else {
+    await setzePos({ a, p }, { aufnehmen: true, menge_fix: neu });
+    if (!alt) toast(`«${a.name}» auf der Liste (${neu}).`);
+  }
 }
 
 function renderArtikel(main) {
   const admin = S.modus !== 'einkauf';
   const q = S.suche.trim().toLowerCase();
   const filter = admin ? FILTER : FILTER.filter(f => ['alle', 'unterMin', 'ohneBestand'].includes(f[0]));
-  if (!filter.some(f => f[0] === S.filter)) S.filter = 'alle';
+  S.filter = 'alle';
   const arts = S.artikel.filter(a => (!q || a.name.toLowerCase().includes(q)) && filterFn(S.filter)(a));
   const minZeigen = admin && store.get('einkauf-min-zeigen') !== 'nein';
   let html = `<input class="search" id="aSuche" placeholder="Artikel suchen …" value="${esc(S.suche)}" autocomplete="off">
-    <div class="chips">${filter.map(([k, t]) => `<button class="chip" data-f="${k}" aria-pressed="${S.filter === k}">${t} (${S.artikel.filter(filterFn(k)).length})</button>`).join('')}</div>
-    <p class="sum">${admin ? `Bestand${minZeigen ? ' und Minimum' : ''} mit − / + anpassen oder eintippen, das wird sofort gespeichert. Für alles andere auf den Namen tippen.
+    <p class="sum">${admin ? `Bestand${minZeigen ? ' und Minimum' : ''} mit − / + anpassen. «Liste» setzt den Artikel mit der Anzahl direkt auf die Einkaufsliste. Für alles andere auf den Namen tippen.
       <button class="btn small" id="minUmschalten" style="margin-left:6px">${minZeigen ? 'Minimum ausblenden' : 'Minimum einblenden'}</button>` : 'Bestand mit − / + anpassen, wenn etwas aufgebraucht oder dazugekommen ist. Das wird sofort gespeichert.'}</p>`;
   if (!arts.length) html += `<div class="card"><div class="empty">Keine Artikel gefunden.</div></div>`;
   const g = gruppiere(arts.sort((x, y) => coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)), a => a.kategorie || OHNE_KAT);
@@ -878,7 +904,7 @@ function renderArtikel(main) {
           <div class="meta">${a.standardladen ? ladenPill(a.standardladen) : '<span class="tag warn">kein Standardladen</span>'}
           ${a.routine ? ` <span class="tag">Routine ${fmt(a.routine_menge)}/Wo</span>` : ''}${a.nur_aktion ? ' <span class="tag">nur Aktion</span>' : ''}
           <span class="tag warn" data-unter ${unter ? '' : 'hidden'}>unter Minimum</span>${!minZeigen ? ` <span class="tag grau">Min ${fmt(a.mindestbestand)}</span>` : ''}</div>${admin ? '</button>' : '</div>'}</div>
-        <div class="zaehlerzeile">${zaehler(a, 'bestand', 'Bestand')}${minZeigen ? zaehler(a, 'mindestbestand', 'Min') : ''}</div>
+        <div class="zaehlerzeile">${zaehler(a, 'bestand', 'Bestand')}${minZeigen ? zaehler(a, 'mindestbestand', 'Min') : ''}${admin ? listenZaehler(a) : ''}</div>
       </div>`;
     }
     html += `</div>`;
@@ -889,11 +915,12 @@ function renderArtikel(main) {
 
   const s = $('#aSuche');
   s.oninput = () => { S.suche = s.value; const pos = s.selectionStart; render(); const n = $('#aSuche'); n.focus(); n.setSelectionRange(pos, pos); };
-  main.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { S.filter = b.dataset.f; render(); });
+  const listeJetzt = admin ? berechneListe().liste : [];
   main.querySelectorAll('.row[data-id]').forEach(row => {
     const a = artById(+row.dataset.id);
     const ed = $('[data-edit]', row); if (ed) ed.onclick = () => artikelDialog(a);
-    row.querySelectorAll('.zaehler').forEach(z => {
+    row.querySelectorAll('[data-liste]').forEach(b => b.onclick = () => aufListeAendern(a, Number(b.dataset.liste), listeJetzt));
+    row.querySelectorAll('.zaehler[data-feld]').forEach(z => {
       const feld = z.dataset.feld, inp = $('input', z);
       z.querySelectorAll('[data-d]').forEach(b => b.onclick = () => {
         const alt = isNum(a[feld]) ? a[feld] : 0;
