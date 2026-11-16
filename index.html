@@ -105,6 +105,13 @@
   .hinweis.warn { background: var(--warn-soft); color: #7a1a14; }
   .hinweis.ok { background: var(--accent-soft); color: var(--accent); }
   .menge { font-weight: 700; color: var(--accent); }
+  .row.vorrat { flex-wrap: wrap; }
+  .row.vorrat .main { flex: 1 1 100%; }
+  .zaehlerzeile { display: flex; gap: 10px 16px; flex-wrap: wrap; width: 100%; margin-top: 4px; }
+  .zaehler { display: flex; align-items: center; gap: 2px; }
+  .zaehler .zlbl { font-size: 12px; color: var(--muted); margin-right: 4px; }
+  .zaehler .iconbtn { border: 1.5px solid var(--line); background: #fff; width: 32px; height: 32px; color: var(--ink); }
+  .zaehler .num { width: 44px; padding: 5px 2px; }
   .result { padding: 8px 12px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
   .result:first-child { border-top: 0; }
   .result .main { flex: 1; }
@@ -277,21 +284,21 @@ function render() {
   const root = $('#root');
   const y = window.scrollY;
   const admin = S.modus !== 'einkauf';
-  const tabs = admin ? [['liste', 'Liste planen'], ['einkaufen', 'Einkaufen'], ['artikel', 'Vorrat']] : [];
-  if (admin && !tabs.some(t => t[0] === S.tab)) S.tab = 'liste';
+  const tabs = admin ? [['liste', 'Liste planen'], ['einkaufen', 'Einkaufen'], ['artikel', 'Vorrat']] : [['einkaufen', 'Einkaufen'], ['artikel', 'Vorrat']];
+  if (!tabs.some(t => t[0] === S.tab)) S.tab = admin ? 'liste' : 'einkaufen';
   root.innerHTML = `
     <header>
       <div class="bar"><h1>${admin ? 'Einkauf & Vorrat' : 'Einkaufsliste'}</h1>
         <button class="iconbtn" id="neuLaden" title="Neu laden" aria-label="Neu laden">↻</button>
         <button class="iconbtn" id="menue" title="Menü" aria-label="Menü">☰</button></div>
-      ${admin ? `<div class="tabs" role="tablist">${tabs.map(([k, t]) => `<button class="tab" role="tab" data-tab="${k}" aria-selected="${S.tab === k}">${t}</button>`).join('')}</div>` : ''}
+      ${tabs.length ? `<div class="tabs" role="tablist">${tabs.map(([k, t]) => `<button class="tab" role="tab" data-tab="${k}" aria-selected="${S.tab === k}">${t}</button>`).join('')}</div>` : ''}
     </header>
     <main id="main"></main>`;
   root.querySelectorAll('.tab').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; window.scrollTo(0, 0); render(); });
   $('#neuLaden').onclick = () => laden();
   $('#menue').onclick = menue;
   const main = $('#main');
-  if (!admin || S.tab === 'einkaufen') renderEinkaufen(main);
+  if (S.tab === 'einkaufen') renderEinkaufen(main);
   else if (S.tab === 'liste') renderListe(main);
   else renderArtikel(main);
   window.scrollTo(0, y);
@@ -642,29 +649,55 @@ function filterFn(f) {
     ohneKat: a => !a.kategorie, ohneLaden: a => !a.standardladen,
   }[f];
 }
+function zaehler(a, feld, label) {
+  return `<div class="zaehler" data-feld="${feld}"><span class="zlbl">${label}</span>
+    <button class="iconbtn" data-d="-1" aria-label="${label} weniger">−</button>
+    <input class="num" type="number" min="0" step="any" inputmode="decimal" value="${fmt(a[feld]).replace(',', '.')}" aria-label="${label}">
+    <button class="iconbtn" data-d="1" aria-label="${label} mehr">+</button></div>`;
+}
+const speicherTimer = {};
+function zaehlerSpeichern(a, feld, wert, row) {
+  a[feld] = wert;
+  const k = a.id + feld;
+  clearTimeout(speicherTimer[k]);
+  speicherTimer[k] = setTimeout(async () => {
+    try { const n = await S.api.artikelAendern(a.id, { [feld]: wert }); if (n) Object.assign(a, n); }
+    catch (e) { fehler(e); }
+    if (row && row.isConnected) aktualisiereZeile(row, a);
+  }, 500);
+  if (row) aktualisiereZeile(row, a);
+}
+function aktualisiereZeile(row, a) {
+  row.querySelectorAll('.zaehler').forEach(z => { const inp = $('input', z); if (document.activeElement !== inp) inp.value = fmt(a[z.dataset.feld]).replace(',', '.'); });
+  const t = $('[data-unter]', row); if (t) t.hidden = grund(a).grund !== 'Nachkaufen' || a.routine;
+}
+
 function renderArtikel(main) {
+  const admin = S.modus !== 'einkauf';
   const q = S.suche.trim().toLowerCase();
+  const filter = admin ? FILTER : FILTER.filter(f => ['alle', 'unterMin', 'ohneBestand'].includes(f[0]));
+  if (!filter.some(f => f[0] === S.filter)) S.filter = 'alle';
   const arts = S.artikel.filter(a => (!q || a.name.toLowerCase().includes(q)) && filterFn(S.filter)(a));
   let html = `<input class="search" id="aSuche" placeholder="Artikel suchen …" value="${esc(S.suche)}" autocomplete="off">
-    <div class="chips">${FILTER.map(([k, t]) => `<button class="chip" data-f="${k}" aria-pressed="${S.filter === k}">${t} (${S.artikel.filter(filterFn(k)).length})</button>`).join('')}</div>
-    <p class="sum">Bestand und Mindestbestand direkt eintippen, sie werden sofort gespeichert. Für alles andere auf den Namen tippen.</p>`;
+    <div class="chips">${filter.map(([k, t]) => `<button class="chip" data-f="${k}" aria-pressed="${S.filter === k}">${t} (${S.artikel.filter(filterFn(k)).length})</button>`).join('')}</div>
+    <p class="sum">${admin ? 'Bestand und Minimum mit − / + anpassen oder eintippen, das wird sofort gespeichert. Für alles andere auf den Namen tippen.' : 'Bestand mit − / + anpassen, wenn etwas aufgebraucht oder dazugekommen ist. Das wird sofort gespeichert.'}</p>`;
   if (!arts.length) html += `<div class="card"><div class="empty">Keine Artikel gefunden.</div></div>`;
   const g = gruppiere(arts.sort((x, y) => coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)), a => a.kategorie || OHNE_KAT);
   for (const [kat, as] of g) {
     html += `<h2>${esc(kat)} <span class="sum">${as.length}</span></h2><div class="card">`;
     for (const a of as) {
-      const gr = grund(a);
-      html += `<div class="row" data-id="${a.id}">
-        <div class="main"><button class="linkish" data-edit><div class="name">${esc(a.name)}</div>
+      const unter = grund(a).grund === 'Nachkaufen';
+      html += `<div class="row vorrat" data-id="${a.id}">
+        <div class="main">${admin ? '<button class="linkish" data-edit>' : '<div>'}<div class="name">${esc(a.name)}</div>
           <div class="meta">${a.standardladen ? ladenPill(a.standardladen) : '<span class="tag warn">kein Standardladen</span>'}
-          ${a.routine ? ` <span class="tag">Routine ${fmt(a.routine_menge)}/Wo</span>` : ''}${a.nur_aktion ? ' <span class="tag">nur Aktion</span>' : ''}${gr.grund === 'Nachkaufen' ? ' <span class="tag warn">unter Minimum</span>' : ''}</div></button></div>
-        <label class="numlabel">Bestand<input class="num" type="number" min="0" step="any" inputmode="decimal" data-feld="bestand" value="${fmt(a.bestand).replace(',', '.')}"></label>
-        <label class="numlabel">Minimum<input class="num" type="number" min="0" step="any" inputmode="decimal" data-feld="mindestbestand" value="${fmt(a.mindestbestand).replace(',', '.')}"></label>
+          ${a.routine ? ` <span class="tag">Routine ${fmt(a.routine_menge)}/Wo</span>` : ''}${a.nur_aktion ? ' <span class="tag">nur Aktion</span>' : ''}
+          <span class="tag warn" data-unter ${unter ? '' : 'hidden'}>unter Minimum</span>${!admin ? ` <span class="tag grau">Min ${fmt(a.mindestbestand)}</span>` : ''}</div>${admin ? '</button>' : '</div>'}</div>
+        <div class="zaehlerzeile">${zaehler(a, 'bestand', 'Bestand')}${admin ? zaehler(a, 'mindestbestand', 'Min') : ''}</div>
       </div>`;
     }
     html += `</div>`;
   }
-  html += `<div class="footer-actions"><button class="btn" id="export">Tabelle exportieren (Excel/CSV)</button></div>
+  if (admin) html += `<div class="footer-actions"><button class="btn" id="export">Tabelle exportieren (Excel/CSV)</button></div>
     <button class="btn primary fab" id="neu">+ Neuer Artikel</button>`;
   main.innerHTML = html;
 
@@ -673,15 +706,21 @@ function renderArtikel(main) {
   main.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { S.filter = b.dataset.f; render(); });
   main.querySelectorAll('.row[data-id]').forEach(row => {
     const a = artById(+row.dataset.id);
-    $('[data-edit]', row).onclick = () => artikelDialog(a);
-    row.querySelectorAll('input[data-feld]').forEach(inp => inp.onchange = () => {
-      const v = toNum(inp.value);
-      if (v !== null && (Number.isNaN(v) || v < 0)) { toast('Bitte eine Zahl ab 0 eingeben.'); inp.value = fmt(a[inp.dataset.feld]).replace(',', '.'); return; }
-      setzeArtikel(a, { [inp.dataset.feld]: v });
+    const ed = $('[data-edit]', row); if (ed) ed.onclick = () => artikelDialog(a);
+    row.querySelectorAll('.zaehler').forEach(z => {
+      const feld = z.dataset.feld, inp = $('input', z);
+      z.querySelectorAll('[data-d]').forEach(b => b.onclick = () => {
+        const alt = isNum(a[feld]) ? a[feld] : 0;
+        zaehlerSpeichern(a, feld, Math.max(0, alt + Number(b.dataset.d)), row);
+      });
+      inp.onchange = () => {
+        const v = toNum(inp.value);
+        if (v !== null && (Number.isNaN(v) || v < 0)) { toast('Bitte eine Zahl ab 0 eingeben.'); inp.value = fmt(a[feld]).replace(',', '.'); return; }
+        zaehlerSpeichern(a, feld, v, row);
+      };
     });
   });
-  $('#neu').onclick = () => artikelDialog(null);
-  $('#export').onclick = exportCsv;
+  if (admin) { $('#neu').onclick = () => artikelDialog(null); $('#export').onclick = exportCsv; }
 }
 
 /* Artikel anlegen / bearbeiten – alle Felder, damit die Tabelle vollständig bleibt */
