@@ -932,8 +932,7 @@ async function aktionMenge(ak, d) {
       else S.pos.push(await S.api.positionNeu(Object.assign({ einkauf_id: S.einkauf.id, artikel_id: a.id }, werte)));
       toast(`«${a.name}» als Aktion auf der Liste (${werte.menge_fix}).`);
     } else {
-      const ersteMal = !(S.frueher || []).some(f => (f.freitext || '').trim().toLowerCase() === ak.name.trim().toLowerCase());
-      if (ersteMal) return neuerArtikelFrage(ak);
+      if (!keinArtikelGewuenscht(ak.name)) return neuerArtikelFrage(ak);
       await aktionAlsFreitext(ak);
     }
   } catch (e) { fehler(e); }
@@ -945,7 +944,12 @@ async function aktionAlsFreitext(ak) {
   toast(`«${ak.name}» auf der Liste.`);
   return p;
 }
-// Aktion ohne passenden Vorratsartikel, zum ersten Mal auf die Liste: fragen, ob ein Artikel angelegt werden soll
+// Produkte, bei denen schon einmal «Nein, kein Artikel» gewählt wurde (auf diesem Gerät gemerkt)
+const KEIN_ARTIKEL_KEY = 'einkauf_kein_artikel';
+function keinArtikelListe() { try { return JSON.parse(localStorage.getItem(KEIN_ARTIKEL_KEY) || '[]'); } catch { return []; } }
+const keinArtikelGewuenscht = name => keinArtikelListe().includes(name.trim().toLowerCase());
+function keinArtikelMerken(name) { try { const l = keinArtikelListe(); l.push(name.trim().toLowerCase()); localStorage.setItem(KEIN_ARTIKEL_KEY, JSON.stringify([...new Set(l)].slice(-500))); } catch { } }
+// Aktion ohne passenden Vorratsartikel auf die Liste: fragen, ob ein Artikel angelegt werden soll (ausser früher schon «Nein»)
 function neuerArtikelFrage(ak) {
   const ov = dialog(`<h2>Neuer Artikel?</h2>
     <p><b>${esc(ak.name)}</b> (${esc(ak.laden)}) ist noch nicht in deinem Vorrat.</p>
@@ -953,7 +957,8 @@ function neuerArtikelFrage(ak) {
     <div class="actions"><button class="btn" id="nfNein">Nein, nur auf die Liste</button><button class="btn primary" id="nfJa">Ja, Artikel anlegen</button></div>`);
   $('#nfNein', ov).onclick = async () => {
     ov.remove();
-    try { await aktionAlsFreitext(ak); S.frueher = (S.frueher || []).concat([{ freitext: ak.name, kategorie: ak.kategorie, laden: ak.laden }]); } catch (e) { fehler(e); }
+    keinArtikelMerken(ak.name);
+    try { await aktionAlsFreitext(ak); } catch (e) { fehler(e); }
     render();
   };
   $('#nfJa', ov).onclick = async () => {
@@ -1287,6 +1292,7 @@ async function startMitSitzung(session) {
 }
 
 /* Menü oben rechts */
+const APP_VERSION = '2026-11-16c';
 function menue() {
   const admin = S.profil && S.profil.rolle === 'admin';
   const ov = dialog(`<h2>Menü</h2>
@@ -1294,7 +1300,7 @@ function menue() {
     <div class="opts" style="flex-direction:column;align-items:stretch">
       ${admin ? `<button class="btn" id="mBenutzer">Benutzer verwalten</button>` : ''}
       <button class="btn" id="mAbmelden">Abmelden</button>
-    </div><div class="actions"><button class="btn" data-close>Schliessen</button></div>`);
+    </div><p class="sum" style="margin-top:10px">App-Version ${APP_VERSION}</p><div class="actions"><button class="btn" data-close>Schliessen</button></div>`);
   if (admin) {
     $('#mBenutzer', ov).onclick = () => { ov.remove(); benutzerDialog(); };
   }
