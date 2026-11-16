@@ -932,11 +932,37 @@ async function aktionMenge(ak, d) {
       else S.pos.push(await S.api.positionNeu(Object.assign({ einkauf_id: S.einkauf.id, artikel_id: a.id }, werte)));
       toast(`«${a.name}» als Aktion auf der Liste (${werte.menge_fix}).`);
     } else {
-      S.pos.push(await S.api.positionNeu({ einkauf_id: S.einkauf.id, freitext: ak.name, kategorie: ak.kategorie || 'Sonstiges', laden: ak.laden, in_aktion: true, aktion_id: ak.id, menge_fix: 1 }));
-      toast(`«${ak.name}» auf der Liste.`);
+      const ersteMal = !(S.frueher || []).some(f => (f.freitext || '').trim().toLowerCase() === ak.name.trim().toLowerCase());
+      if (ersteMal) return neuerArtikelFrage(ak);
+      await aktionAlsFreitext(ak);
     }
   } catch (e) { fehler(e); }
   render();
+}
+async function aktionAlsFreitext(ak) {
+  const p = await S.api.positionNeu({ einkauf_id: S.einkauf.id, freitext: ak.name, kategorie: ak.kategorie || 'Sonstiges', laden: ak.laden, in_aktion: true, aktion_id: ak.id, menge_fix: 1 });
+  S.pos.push(p);
+  toast(`«${ak.name}» auf der Liste.`);
+  return p;
+}
+// Aktion ohne passenden Vorratsartikel, zum ersten Mal auf die Liste: fragen, ob ein Artikel angelegt werden soll
+function neuerArtikelFrage(ak) {
+  const ov = dialog(`<h2>Neuer Artikel?</h2>
+    <p><b>${esc(ak.name)}</b> (${esc(ak.laden)}) ist noch nicht in deinem Vorrat.</p>
+    <p>Soll ich daraus einen Artikel machen? Dann kannst du Bestand, Routine und Standardladen festlegen, und die App erkennt ihn bei künftigen Aktionen.</p>
+    <div class="actions"><button class="btn" id="nfNein">Nein, nur auf die Liste</button><button class="btn primary" id="nfJa">Ja, Artikel anlegen</button></div>`);
+  $('#nfNein', ov).onclick = async () => {
+    ov.remove();
+    try { await aktionAlsFreitext(ak); S.frueher = (S.frueher || []).concat([{ freitext: ak.name, kategorie: ak.kategorie, laden: ak.laden }]); } catch (e) { fehler(e); }
+    render();
+  };
+  $('#nfJa', ov).onclick = async () => {
+    ov.remove();
+    let p;
+    try { p = await aktionAlsFreitext(ak); } catch (e) { fehler(e); render(); return; }
+    render();
+    artikelDialog(null, { name: ak.name.replace(/\s*·\s*/g, ' '), kategorie: ak.kategorie, standardladen: ak.laden, laeden: [ak.laden], nur_aktion: false, mindestbestand: 0 }, p);
+  };
 }
 
 /* ===== Vorrat & Artikel ===== */
@@ -1137,8 +1163,11 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
       if (neu) {
         const n = await S.api.artikelNeu(obj); S.artikel.push(n);
         if (ausPosition) { await S.api.positionLoeschen(ausPosition.id); S.pos = S.pos.filter(p => p !== ausPosition); }
+        S.aktionen.forEach(x => { delete x._match; });
         if (ausPosition || $('#fAufListe', ov)?.checked) {
-          const p = await S.api.positionNeu({ einkauf_id: S.einkauf.id, artikel_id: n.id, aufnehmen: true, menge_fix: ausPosition ? ausPosition.menge_fix || 1 : Math.max(1, grund(n).menge) });
+          const extra = ausPosition ? { in_aktion: !!ausPosition.in_aktion, aktion_id: ausPosition.aktion_id || null, bemerkung: ausPosition.bemerkung || null,
+            laden: ausPosition.laden && ausPosition.laden !== n.standardladen ? ausPosition.laden : null } : {};
+          const p = await S.api.positionNeu(Object.assign({ einkauf_id: S.einkauf.id, artikel_id: n.id, aufnehmen: true, menge_fix: ausPosition ? ausPosition.menge_fix || 1 : Math.max(1, grund(n).menge) }, extra));
           S.pos.push(p);
         }
         toast(`«${n.name}» angelegt.`);
