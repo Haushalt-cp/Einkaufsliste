@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Einkauf & Vorrat</title>
+<meta name="theme-color" content="#f6f4ef">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Einkauf">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<style>
+  :root {
+    --bg: #f6f4ef; --card: #fff; --ink: #1f2a22; --muted: #6b736c; --line: #e4e0d6;
+    --accent: #3b4a3f; --accent-soft: #e6ebe4; --warn: #b3261e; --warn-soft: #fbe9e7;
+    --denner: #f5d94a; --migros: #ff9a3c; --lidl: #5b8def; --coop: #4caf73; --tuerke: #e2574c;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .bar { max-width: 760px; margin: 0 auto; display: flex; align-items: center; gap: 8px; padding: 10px 14px; }
+  .bar h1 { font-size: 18px; margin: 0; flex: 1; }
+  .tabs { max-width: 760px; margin: 0 auto; display: flex; gap: 4px; padding: 0 14px 8px; }
+  .tab { flex: 1; border: 0; background: transparent; padding: 9px; border-radius: 10px; color: var(--muted); font-weight: 600; }
+  .tab[aria-selected="true"] { background: var(--accent); color: #fff; }
+  main { max-width: 760px; margin: 0 auto; padding: 12px 14px 120px; }
+  .btn { border: 1.5px solid var(--line); background: var(--card); padding: 9px 14px; border-radius: 10px; font-weight: 600; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.danger { color: var(--warn); border-color: #f0c9c5; }
+  .btn.small { padding: 5px 10px; font-size: 14px; }
+  .btn:disabled { opacity: .5; }
+  .iconbtn { border: 0; background: transparent; width: 34px; height: 34px; border-radius: 8px; font-size: 18px; line-height: 1; color: var(--muted); }
+  .iconbtn:hover { background: var(--accent-soft); }
+  .search { width: 100%; padding: 11px 12px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--card); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+  .chip { border: 1.5px solid var(--line); background: var(--card); border-radius: 999px; padding: 5px 11px; font-size: 14px; }
+  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  h2 { font-size: 15px; margin: 22px 0 8px; display: flex; align-items: center; gap: 8px; }
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+  .row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .row:first-child { border-top: 0; }
+  .row .main { flex: 1; min-width: 0; }
+  .row .name { font-weight: 600; overflow-wrap: anywhere; }
+  .row .meta { font-size: 13px; color: var(--muted); }
+  .linkish { border: 0; background: none; padding: 0; text-align: left; width: 100%; }
+  .pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: #eee; color: #222; white-space: nowrap; }
+  .pill.Denner { background: var(--denner); } .pill.Migros { background: var(--migros); }
+  .pill.Lidl { background: var(--lidl); color: #fff; } .pill.Coop { background: var(--coop); color: #fff; }
+  .pill.Türkengeschäft { background: var(--tuerke); color: #fff; }
+  .tag { white-space: nowrap; font-size: 12px; padding: 1px 7px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .tag.warn { background: var(--warn-soft); color: var(--warn); }
+  .num { width: 58px; padding: 6px; border: 1.5px solid var(--line); border-radius: 8px; text-align: center; background: #fff; }
+  .numlabel { display: flex; flex-direction: column; align-items: center; font-size: 11px; color: var(--muted); gap: 2px; }
+  .stepper { display: flex; align-items: center; gap: 2px; }
+  .stepper span { min-width: 26px; text-align: center; font-weight: 700; }
+  .check { width: 26px; height: 26px; accent-color: var(--accent); flex: none; }
+  .done .name { text-decoration: line-through; color: var(--muted); }
+  .na .name { color: var(--warn); }
+  select.laden { border: 1.5px solid var(--line); border-radius: 8px; padding: 4px 6px; background: #fff; font-size: 14px; max-width: 132px; }
+  .empty { color: var(--muted); padding: 14px 12px; font-size: 14px; }
+  .fab { position: fixed; right: max(16px, calc(50% - 364px)); bottom: 20px; z-index: 6; box-shadow: 0 4px 14px rgba(0,0,0,.18); border-radius: 999px; padding: 13px 20px; }
+  .footer-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 24px; }
+  details.card > summary { list-style: none; padding: 10px 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  details.card > summary::-webkit-details-marker { display: none; }
+  details.card > summary::after { content: "▾"; margin-left: auto; color: var(--muted); }
+  details.card[open] > summary::after { content: "▴"; }
+  details.card > .rows > .row:first-child { border-top: 1px solid var(--line); }
+  /* Dialog */
+  .overlay { position: fixed; inset: 0; background: rgba(20,25,20,.45); z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
+  .sheet { background: var(--bg); width: 100%; max-width: 560px; max-height: 92vh; overflow: auto; border-radius: 16px 16px 0 0; padding: 16px 16px 24px; }
+  @media (min-width: 700px) { .overlay { align-items: center; } .sheet { border-radius: 16px; } }
+  .sheet h2 { margin: 0 0 12px; font-size: 18px; }
+  .field { margin: 12px 0; }
+  .field > label, .field > .lbl { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+  .field input[type=text], .field input[type=number], .field select, .field textarea { width: 100%; padding: 10px; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; }
+  .field .hint { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .opt { display: inline-flex; align-items: center; gap: 6px; border: 1.5px solid var(--line); background: #fff; border-radius: 10px; padding: 7px 10px; font-size: 15px; }
+  .opt input { accent-color: var(--accent); margin: 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .err { color: var(--warn); font-size: 13px; margin-top: 4px; }
+  .sheet .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
+  .sheet .actions .spacer { flex: 1; }
+  .toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 14px; border-radius: 10px; z-index: 30; display: flex; gap: 12px; align-items: center; max-width: 92vw; font-size: 14px; }
+  .toast button { background: none; border: 0; color: #ffd27a; font-weight: 700; padding: 0; }
+  .setup { max-width: 420px; margin: 48px auto; text-align: center; padding: 0 20px; }
+  .setup img { width: 80px; height: 80px; border-radius: 18px; }
+  .setup p { color: var(--muted); font-size: 14px; }
+  .setup input { width: 100%; padding: 12px; border: 1.5px solid var(--line); border-radius: 10px; margin-top: 8px; }
+  .setup .btn { width: 100%; margin-top: 10px; }
+  .loading { text-align: center; color: var(--muted); padding: 40px 0; }
+  .sum { font-size: 13px; color: var(--muted); font-weight: 500; }
+  .result { padding: 8px 12px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
+  .result:first-child { border-top: 0; }
+  .result .main { flex: 1; }
+</style>
+</head>
+<body>
+<div id="root"><div class="loading">Lädt …</div></div>
+
+<script>
+'use strict';
+/* =========================================================================
+   Einkauf & Vorrat – Version 1
+   Daten liegen in Supabase (Projekt einkaufs-app). Der Zugangsschlüssel
+   steht NICHT in dieser Datei (das GitHub-Projekt ist öffentlich), sondern
+   kommt einmalig aus dem Link hinter dem #-Zeichen und wird auf dem Gerät
+   gespeichert.
+   ========================================================================= */
+const SUPABASE_URL = 'https://xfwxgviomkamxqsfhvow.supabase.co';
+const KEY_STORE = 'einkauf-app-schluessel';
+const LAEDEN = ['Denner', 'Migros', 'Lidl', 'Coop', 'Türkengeschäft'];
+const OHNE_LADEN = 'Ohne Laden';
+const OHNE_KAT = 'Ohne Kategorie';
+
+/* ---------- Hilfen ---------- */
+const $ = (sel, el = document) => el.querySelector(sel);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const isNum = v => typeof v === 'number' && !Number.isNaN(v);
+const toNum = v => (v === '' || v === null || v === undefined) ? null : Number(String(v).replace(',', '.'));
+const fmt = n => isNum(n) ? String(Math.round(n * 100) / 100).replace('.', ',') : '';
+const coll = new Intl.Collator('de-CH', { sensitivity: 'base', numeric: true });
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+};
+
+/* ---------- Datenzugriff (Supabase REST) ---------- */
+function restApi(key) {
+  const base = SUPABASE_URL + '/rest/v1/';
+  async function call(method, path, body, prefer) {
+    const headers = { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' };
+    if (prefer) headers.Prefer = prefer;
+    const res = await fetch(base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    if (!res.ok) {
+      let msg = res.status + '';
+      try { const j = await res.json(); msg = j.message || j.hint || msg; } catch (e) {}
+      const err = new Error(msg); err.status = res.status; throw err;
+    }
+    if (res.status === 204) return null;
+    const t = await res.text();
+    return t ? JSON.parse(t) : null;
+  }
+  return {
+    artikel: () => call('GET', 'artikel?select=*&aktiv=eq.true&order=name.asc'),
+    artikelNeu: obj => call('POST', 'artikel', obj, 'return=representation').then(r => r[0]),
+    artikelAendern: (id, obj) => call('PATCH', 'artikel?id=eq.' + id, obj, 'return=representation').then(r => r[0]),
+    offenerEinkauf: () => call('GET', 'einkauf?select=*&abgeschlossen_am=is.null&order=id.desc&limit=1').then(r => r[0] || null),
+    einkaufNeu: () => call('POST', 'einkauf', {}, 'return=representation').then(r => r[0]),
+    einkaufAbschliessen: id => call('PATCH', 'einkauf?id=eq.' + id, { abgeschlossen_am: new Date().toISOString() }),
+    positionen: eid => call('GET', 'einkauf_position?select=*&einkauf_id=eq.' + eid + '&order=id.asc'),
+    positionNeu: obj => call('POST', 'einkauf_position', obj, 'return=representation').then(r => r[0]),
+    positionAendern: (id, obj) => call('PATCH', 'einkauf_position?id=eq.' + id, obj, 'return=representation').then(r => r[0]),
+    positionLoeschen: id => call('DELETE', 'einkauf_position?id=eq.' + id),
+    fruehereZusatz: () => call('GET', 'einkauf_position?select=freitext,kategorie,laden&freitext=not.is.null&order=id.desc&limit=300'),
+    pruefen: () => call('GET', 'artikel?select=id&limit=1'),
+  };
+}
+
+/* Demo-Daten (nur mit ?demo): zum Ausprobieren ohne Datenbank */
+function demoApi() {
+  let nid = 100;
+  const A = [
+    { id: 1, name: 'Denner Milchdrink UHT 1,5 %', laeden: ['Denner'], standardladen: 'Denner', nur_aktion: false, routine: true, routine_menge: 10, bestand: null, mindestbestand: 6, kategorie: 'Frühstück & Getränke', bemerkung: null, aktiv: true },
+    { id: 2, name: 'Cola Zero', laeden: ['Migros'], standardladen: 'Migros', nur_aktion: false, routine: true, routine_menge: 2, bestand: null, mindestbestand: 2, kategorie: 'Frühstück & Getränke', bemerkung: null, aktiv: true },
+    { id: 3, name: 'Gehackte Tomaten', laeden: ['Denner', 'Migros'], standardladen: 'Migros', nur_aktion: true, routine: false, routine_menge: null, bestand: 1, mindestbestand: 2, kategorie: 'Konserven & Saucen', bemerkung: null, aktiv: true },
+    { id: 4, name: 'Tomatenpüree', laeden: ['Denner', 'Migros'], standardladen: 'Migros', nur_aktion: false, routine: false, routine_menge: null, bestand: 0, mindestbestand: 1, kategorie: 'Konserven & Saucen', bemerkung: null, aktiv: true },
+    { id: 5, name: 'Bulgur', laeden: ['Denner', 'Türkengeschäft'], standardladen: 'Türkengeschäft', nur_aktion: false, routine: false, routine_menge: null, bestand: 3, mindestbestand: 1, kategorie: 'Teigwaren, Reis & Hülsenfrüchte', bemerkung: null, aktiv: true },
+    { id: 6, name: 'Kohlrabi', laeden: ['Denner', 'Migros'], standardladen: null, nur_aktion: false, routine: true, routine_menge: 3, bestand: null, mindestbestand: null, kategorie: 'Brot & Frischware', bemerkung: null, aktiv: true },
+    { id: 7, name: 'Blumenkohl', laeden: ['Denner', 'Migros'], standardladen: 'Migros', nur_aktion: true, routine: false, routine_menge: null, bestand: null, mindestbestand: null, kategorie: null, bemerkung: null, aktiv: true },
+  ];
+  let E = []; let P = [];
+  const d = x => JSON.parse(JSON.stringify(x));
+  const later = x => new Promise(r => setTimeout(() => r(d(x)), 10));
+  return {
+    artikel: () => later(A.filter(a => a.aktiv)),
+    artikelNeu: o => { const a = Object.assign({ id: ++nid, aktiv: true, laeden: [], bemerkung: null }, o); A.push(a); return later(a); },
+    artikelAendern: (id, o) => { const a = A.find(x => x.id === id); Object.assign(a, o); return later(a); },
+    offenerEinkauf: () => later(E.find(e => !e.abgeschlossen_am) || null),
+    einkaufNeu: () => { const e = { id: ++nid, abgeschlossen_am: null }; E.push(e); return later(e); },
+    einkaufAbschliessen: id => { E.find(e => e.id === id).abgeschlossen_am = new Date().toISOString(); return later(null); },
+    positionen: eid => later(P.filter(p => p.einkauf_id === eid)),
+    positionNeu: o => { const p = Object.assign({ id: ++nid, artikel_id: null, freitext: null, kategorie: null, menge_anpassung: 0, menge_fix: null, laden: null, aufnehmen: null, gekauft: false, nicht_erhaeltlich: false }, o); P.push(p); return later(p); },
+    positionAendern: (id, o) => { const p = P.find(x => x.id === id); Object.assign(p, o); return later(p); },
+    positionLoeschen: id => { P = P.filter(x => x.id !== id); return later(null); },
+    fruehereZusatz: () => later(P.filter(p => p.freitext).map(p => ({ freitext: p.freitext, kategorie: p.kategorie, laden: p.laden }))),
+    pruefen: () => later([]),
+  };
+}
+
+/* ---------- Zustand ---------- */
+const S = {
+  api: null, artikel: [], einkauf: null, pos: [], frueher: [],
+  tab: 'liste', suche: '', filter: 'alle', laden: 'alle',
+};
+const posFor = id => S.pos.find(p => p.artikel_id === id);
+const artById = id => S.artikel.find(a => a.id === id);
+const kategorien = () => [...new Set(S.artikel.map(a => a.kategorie).filter(Boolean).concat(S.pos.map(p => p.kategorie).filter(Boolean)))].sort(coll.compare);
+
+/* ---------- Einkaufslogik ---------- */
+// Grundmenge ohne Wochenanpassung
+function grund(a) {
+  if (a.routine) return { menge: a.routine_menge || 0, grund: 'Routine' };
+  if (isNum(a.bestand) && isNum(a.mindestbestand) && a.bestand <= a.mindestbestand)
+    return { menge: a.mindestbestand - a.bestand + 1, grund: 'Nachkaufen' };
+  return { menge: 0, grund: '' };
+}
+// Berechnet alle Zeilen der aktuellen Liste
+function berechneListe() {
+  const liste = [], aktion = [], entfernt = [];
+  for (const a of S.artikel) {
+    const p = posFor(a.id), g = grund(a);
+    const laden = (p && p.laden) || a.standardladen || OHNE_LADEN;
+    let menge = p && p.menge_fix != null ? p.menge_fix : g.menge + ((p && p.menge_anpassung) || 0);
+    const item = { a, p, laden, menge, grund: g.grund, faellig: g.menge > 0, kategorie: a.kategorie || OHNE_KAT, name: a.name };
+    if (p && p.aufnehmen === false) { if (g.menge > 0 || a.nur_aktion) entfernt.push(item); continue; }
+    if (a.nur_aktion && !(p && p.aufnehmen === true)) { aktion.push(item); continue; }
+    if (p && p.aufnehmen === true) { item.grund = item.grund || (a.nur_aktion ? 'Aktion' : 'Zusätzlich'); if (menge < 1) item.menge = 1; liste.push(item); continue; }
+    if (menge > 0) liste.push(item);
+  }
+  for (const p of S.pos.filter(p => !p.artikel_id)) {
+    liste.push({ a: null, p, laden: p.laden || OHNE_LADEN, menge: p.menge_fix || 1, grund: 'Zusätzlich', kategorie: p.kategorie || OHNE_KAT, name: p.freitext });
+  }
+  return { liste, aktion, entfernt };
+}
+
+/* Position anlegen oder ändern */
+async function setzePos(item, aenderung) {
+  try {
+    if (item.p) {
+      const neu = await S.api.positionAendern(item.p.id, aenderung);
+      Object.assign(item.p, neu);
+    } else {
+      const neu = await S.api.positionNeu(Object.assign({ einkauf_id: S.einkauf.id, artikel_id: item.a.id }, aenderung));
+      S.pos.push(neu);
+    }
+  } catch (e) { fehler(e); }
+  render();
+}
+async function setzeArtikel(a, aenderung) {
+  try { Object.assign(a, await S.api.artikelAendern(a.id, aenderung)); } catch (e) { fehler(e); }
+  render();
+}
+
+/* ---------- Rendering ---------- */
+function render() {
+  const root = $('#root');
+  const y = window.scrollY;
+  root.innerHTML = `
+    <header>
+      <div class="bar"><h1>Einkauf & Vorrat</h1>
+        <button class="iconbtn" id="neuLaden" title="Neu laden" aria-label="Neu laden">↻</button></div>
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" data-tab="liste" aria-selected="${S.tab === 'liste'}">Einkaufsliste</button>
+        <button class="tab" role="tab" data-tab="artikel" aria-selected="${S.tab === 'artikel'}">Vorrat & Artikel</button>
+      </div>
+    </header>
+    <main id="main"></main>`;
+  root.querySelectorAll('.tab').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; window.scrollTo(0, 0); render(); });
+  $('#neuLaden').onclick = () => laden();
+  if (S.tab === 'liste') renderListe($('#main')); else renderArtikel($('#main'));
+  window.scrollTo(0, y);
+}
+
+function ladenPill(l) { return l === OHNE_LADEN ? `<span class="pill">${OHNE_LADEN}</span>` : `<span class="pill ${esc(l)}">${esc(l)}</span>`; }
+function ladenSelect(cur, cls = 'laden') {
+  return `<select class="${cls}" aria-label="Laden">${(cur === OHNE_LADEN ? [OHNE_LADEN] : []).concat(LAEDEN).map(l => `<option ${l === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+}
+function gruppiere(items, key) {
+  const m = new Map();
+  for (const it of items) { const k = key(it); if (!m.has(k)) m.set(k, []); m.get(k).push(it); }
+  return m;
+}
+
+/* ===== Einkaufsliste ===== */
+function renderListe(main) {
+  const { liste, aktion, entfernt } = berechneListe();
+  const ladenListe = LAEDEN.concat([OHNE_LADEN]).filter(l => liste.some(i => i.laden === l));
+  if (S.laden !== 'alle' && !ladenListe.includes(S.laden)) S.laden = 'alle';
+  const sichtbar = liste.filter(i => S.laden === 'alle' || i.laden === S.laden);
+  const offen = liste.filter(i => !(i.p && i.p.gekauft)).length;
+
+  let html = `<div class="chips" role="group" aria-label="Laden filtern">
+      <button class="chip" data-laden="alle" aria-pressed="${S.laden === 'alle'}">Alle (${liste.length})</button>
+      ${ladenListe.map(l => `<button class="chip" data-laden="${esc(l)}" aria-pressed="${S.laden === l}">${esc(l)} (${liste.filter(i => i.laden === l).length})</button>`).join('')}
+    </div>`;
+
+  if (!liste.length) html += `<div class="card"><div class="empty">Noch nichts auf der Liste. Routineartikel und Artikel unter dem Mindestbestand erscheinen hier automatisch.</div></div>`;
+
+  const nachLaden = gruppiere(sichtbar, i => i.laden);
+  for (const l of ladenListe) {
+    const items = nachLaden.get(l); if (!items) continue;
+    html += `<h2>${ladenPill(l)} <span class="sum">${items.filter(i => !(i.p && i.p.gekauft)).length} offen</span>
+      <button class="btn small" data-kopieren="${esc(l)}" style="margin-left:auto">Liste kopieren</button></h2><div class="card">`;
+    const nachKat = gruppiere(items.sort((x, y) => coll.compare(x.kategorie, y.kategorie) || coll.compare(x.name, y.name)), i => i.kategorie);
+    let first = true;
+    for (const [kat, its] of nachKat) {
+      html += `<div class="row" style="padding:6px 12px;${first ? '' : ''}"><h3 style="margin:0">${esc(kat)}</h3></div>`;
+      first = false;
+      for (const i of its) html += listenZeile(i);
+    }
+    html += `</div>`;
+  }
+
+  // Nur-Aktion-Artikel
+  if (aktion.length) {
+    const sorted = aktion.sort((x, y) => (y.faellig - x.faellig) || coll.compare(x.name, y.name));
+    const faellig = aktion.filter(i => i.faellig).length;
+    html += `<h2>Nur bei Aktion</h2>
+      <details class="card" ${faellig ? 'open' : ''}><summary>${aktion.length} Artikel – diese Woche in Aktion? ${faellig ? `<span class="tag warn">${faellig} fällig</span>` : ''}</summary>
+      <div class="rows">${sorted.map(i => `
+        <div class="row"><div class="main"><div class="name">${esc(i.name)}</div>
+          <div class="meta">${ladenPill(i.laden)} ${i.faellig ? `<span class="tag warn">${esc(i.grund)}</span>` : ''}</div></div>
+          <button class="btn small" data-aufnehmen="${i.a.id}">+ Aufnehmen</button></div>`).join('')}</div></details>`;
+  }
+  if (entfernt.length) {
+    html += `<h2>Diese Woche entfernt</h2><details class="card"><summary>${entfernt.length} Artikel</summary><div class="rows">
+      ${entfernt.map(i => `<div class="row"><div class="main"><div class="name">${esc(i.name)}</div><div class="meta">${ladenPill(i.laden)}</div></div>
+      <button class="btn small" data-zurueck="${i.a.id}">Zurückholen</button></div>`).join('')}</div></details>`;
+  }
+
+  html += `<div class="footer-actions">
+      <button class="btn" id="exportListe">Liste als Text kopieren</button>
+      <button class="btn primary" id="abschliessen" ${liste.length ? '' : 'disabled'}>Einkauf abschliessen</button>
+    </div>
+    <p class="sum" style="margin-top:8px">${offen} von ${liste.length} noch offen. «Einkauf abschliessen» bucht gekaufte Vorratsartikel in den Bestand und startet die nächste Liste.</p>
+    <button class="btn primary fab" id="hinzu">+ Hinzufügen</button>`;
+  main.innerHTML = html;
+
+  main.querySelectorAll('[data-laden]').forEach(b => b.onclick = () => { S.laden = b.dataset.laden; render(); });
+  main.querySelectorAll('[data-aufnehmen]').forEach(b => b.onclick = () => {
+    const a = artById(+b.dataset.aufnehmen), g = grund(a), p = posFor(a.id);
+    setzePos({ a, p }, { aufnehmen: true, menge_fix: (p && p.menge_fix) || Math.max(1, g.menge) });
+  });
+  main.querySelectorAll('[data-zurueck]').forEach(b => b.onclick = () => {
+    const a = artById(+b.dataset.zurueck); setzePos({ a, p: posFor(a.id) }, { aufnehmen: a.nur_aktion ? true : null });
+  });
+  main.querySelectorAll('[data-kopieren]').forEach(b => b.onclick = () => kopiereText(textListe(liste.filter(i => i.laden === b.dataset.kopieren))));
+  $('#exportListe').onclick = () => kopiereText(textListe(liste));
+  $('#abschliessen').onclick = abschliessenDialog;
+  $('#hinzu').onclick = hinzufuegenDialog;
+  verdrahteZeilen(main, liste);
+}
+
+function listenZeile(i) {
+  const p = i.p || {}, key = i.a ? 'a' + i.a.id : 'p' + p.id;
+  const cls = (p.gekauft ? ' done' : '') + (p.nicht_erhaeltlich ? ' na' : '');
+  const anders = i.a && p.laden && p.laden !== i.a.standardladen;
+  return `<div class="row${cls}" data-key="${key}">
+    <input type="checkbox" class="check" data-act="gekauft" ${p.gekauft ? 'checked' : ''} aria-label="Gekauft">
+    <div class="main">
+      <div class="name">${esc(i.name)}</div>
+      <div class="meta">${esc(i.grund)}${i.a && i.a.nur_aktion ? ' · <span class="tag">Aktion</span>' : ''}${anders ? ' · <span class="tag">nur diese Woche</span>' : ''}${p.nicht_erhaeltlich ? ' · <span class="tag warn">nicht erhältlich</span>' : ''}</div>
+      <div style="margin-top:4px">${ladenSelect(i.laden)}</div>
+    </div>
+    <div class="stepper">
+      <button class="iconbtn" data-act="minus" aria-label="Weniger">−</button><span>${fmt(i.menge)}</span>
+      <button class="iconbtn" data-act="plus" aria-label="Mehr">+</button>
+    </div>
+    <button class="iconbtn" data-act="mehr" aria-label="Weitere Aktionen">⋯</button>
+  </div>`;
+}
+
+function verdrahteZeilen(main, liste) {
+  const map = new Map(liste.map(i => [i.a ? 'a' + i.a.id : 'p' + i.p.id, i]));
+  main.querySelectorAll('.row[data-key]').forEach(row => {
+    const i = map.get(row.dataset.key); if (!i) return;
+    row.querySelector('[data-act=gekauft]').onchange = e => setzePos(i, { gekauft: e.target.checked });
+    row.querySelector('[data-act=plus]').onclick = () => setzePos(i, { menge_fix: i.menge + 1 });
+    row.querySelector('[data-act=minus]').onclick = () => {
+      if (i.menge > 1) return setzePos(i, { menge_fix: i.menge - 1 });
+      entfernen(i);
+    };
+    row.querySelector('select.laden').onchange = e => ladenGeaendert(i, e.target.value);
+    row.querySelector('[data-act=mehr]').onclick = () => zeilenMenue(i);
+  });
+}
+
+async function entfernen(i) {
+  if (!i.a) { try { await S.api.positionLoeschen(i.p.id); S.pos = S.pos.filter(p => p !== i.p); } catch (e) { fehler(e); } render(); return; }
+  const vorher = { aufnehmen: i.p ? i.p.aufnehmen : null, menge_fix: i.p ? i.p.menge_fix : null };
+  await setzePos(i, { aufnehmen: false, menge_fix: null, gekauft: false });
+  toast(`«${i.name}» für diese Woche entfernt.`, 'Rückgängig', () => setzePos({ a: i.a, p: posFor(i.a.id) }, vorher));
+}
+
+async function ladenGeaendert(i, laden) {
+  if (!i.a) return setzePos(i, { laden });
+  await setzePos(i, { laden: laden === i.a.standardladen ? null : laden });
+  if (laden !== i.a.standardladen) {
+    toast(`Diese Woche bei ${laden}.`, 'Immer dort kaufen', async () => {
+      const laeden = [...new Set((i.a.laeden || []).concat([laden]))];
+      await setzeArtikel(i.a, { standardladen: laden, laeden });
+      const p = posFor(i.a.id); if (p) await setzePos({ a: i.a, p }, { laden: null });
+      toast(`Standardladen von «${i.a.name}» ist jetzt ${laden}.`);
+    });
+  }
+}
+
+function zeilenMenue(i) {
+  const p = i.p || {};
+  const ov = dialog(`<h2>${esc(i.name)}</h2>
+    <div class="field"><div class="lbl">Menge diese Woche</div>
+      <input type="number" min="1" step="1" id="mMenge" value="${fmt(i.menge)}" inputmode="numeric"></div>
+    <div class="opts" style="margin:12px 0">
+      <button class="btn" id="mNA">${p.nicht_erhaeltlich ? 'Wieder erhältlich' : 'Nicht erhältlich'}</button>
+      <button class="btn danger" id="mWeg">Diese Woche entfernen</button>
+      ${i.a ? `<button class="btn" id="mBearb">Artikel bearbeiten</button>` : ''}
+      ${!i.a ? `<button class="btn" id="mAlsArtikel">Als Vorratsartikel speichern</button>` : ''}
+    </div>
+    <div class="actions"><button class="btn" data-close>Schliessen</button><button class="btn primary" id="mOk">Menge speichern</button></div>`);
+  $('#mOk', ov).onclick = () => { const v = Math.round(toNum($('#mMenge', ov).value)); if (v >= 1) setzePos(i, { menge_fix: v }); ov.remove(); };
+  $('#mNA', ov).onclick = () => { setzePos(i, { nicht_erhaeltlich: !p.nicht_erhaeltlich }); ov.remove(); };
+  $('#mWeg', ov).onclick = () => { ov.remove(); entfernen(i); };
+  if (i.a) $('#mBearb', ov).onclick = () => { ov.remove(); artikelDialog(i.a); };
+  if (!i.a) $('#mAlsArtikel', ov).onclick = () => { ov.remove(); artikelDialog(null, { name: i.name, kategorie: i.p.kategorie, standardladen: i.p.laden }, i.p); };
+}
+
+function textListe(items) {
+  const g = gruppiere(items.filter(i => !(i.p && i.p.gekauft)), i => i.laden);
+  let t = [];
+  for (const l of LAEDEN.concat([OHNE_LADEN])) {
+    const its = g.get(l); if (!its) continue;
+    t.push(l.toUpperCase());
+    its.sort((x, y) => coll.compare(x.kategorie, y.kategorie) || coll.compare(x.name, y.name))
+      .forEach(i => t.push(`- ${fmt(i.menge)}× ${i.name}`));
+    t.push('');
+  }
+  return t.join('\n').trim() || 'Liste ist leer.';
+}
+async function kopiereText(t) {
+  try { await navigator.clipboard.writeText(t); toast('Liste kopiert.'); }
+  catch (e) {
+    const ov = dialog(`<h2>Liste</h2><div class="field"><textarea rows="12" readonly>${esc(t)}</textarea></div><div class="actions"><button class="btn" data-close>Schliessen</button></div>`);
+    $('textarea', ov).select();
+  }
+}
+
+/* Hinzufügen: Vorratsartikel, frühere Zusatzartikel oder neuer Freitext */
+function hinzufuegenDialog() {
+  const ov = dialog(`<h2>Zur Liste hinzufügen</h2>
+    <input class="search" id="hSuche" placeholder="Artikel suchen oder neu eingeben …" autocomplete="off">
+    <div id="hErg" class="card" style="margin-top:10px"></div>
+    <div class="actions"><button class="btn" data-close>Fertig</button></div>`);
+  const inp = $('#hSuche', ov), erg = $('#hErg', ov);
+  const frueher = [...new Map(S.frueher.map(f => [f.freitext.toLowerCase(), f])).values()];
+  function zeige() {
+    const q = inp.value.trim().toLowerCase();
+    const aufListe = new Set(berechneListe().liste.filter(i => i.a).map(i => i.a.id));
+    const treffer = S.artikel.filter(a => !q || a.name.toLowerCase().includes(q)).sort((x, y) => coll.compare(x.name, y.name)).slice(0, q ? 30 : 0);
+    const zus = frueher.filter(f => (!q || f.freitext.toLowerCase().includes(q)) && !S.pos.some(p => !p.artikel_id && p.freitext.toLowerCase() === f.freitext.toLowerCase()));
+    let h = '';
+    for (const a of treffer) h += `<div class="result"><div class="main"><div class="name">${esc(a.name)}</div><div class="meta">${a.standardladen ? ladenPill(a.standardladen) : ''} ${esc(a.kategorie || '')}</div></div>
+      ${aufListe.has(a.id) ? '<span class="tag">auf Liste</span>' : `<button class="btn small" data-art="${a.id}">+</button>`}</div>`;
+    if (!q && zus.length) {
+      h += `<div class="result"><h3 style="margin:0">Früher hinzugefügt</h3></div>`;
+      const g = gruppiere(zus.sort((x, y) => coll.compare(x.kategorie || OHNE_KAT, y.kategorie || OHNE_KAT)), f => f.kategorie || OHNE_KAT);
+      for (const [k, fs] of g) h += `<div class="result"><div class="main"><div class="meta">${esc(k)}</div><div class="opts" style="margin-top:4px">${fs.map(f => `<button class="chip" data-frueher="${esc(f.freitext)}">+ ${esc(f.freitext)}</button>`).join('')}</div></div></div>`;
+    } else if (q) {
+      for (const f of zus.slice(0, 10)) h += `<div class="result"><div class="main"><div class="name">${esc(f.freitext)}</div><div class="meta">früher hinzugefügt · ${esc(f.kategorie || '')}</div></div><button class="btn small" data-frueher="${esc(f.freitext)}">+</button></div>`;
+    }
+    if (q && !S.artikel.some(a => a.name.toLowerCase() === q)) {
+      h += `<div class="result"><div class="main"><div class="name">«${esc(inp.value.trim())}»</div><div class="meta">neu</div></div>
+        <button class="btn small" data-einmal>Nur diese Woche</button><button class="btn small primary" data-neuart>Als Vorratsartikel</button></div>`;
+    }
+    erg.innerHTML = h || '<div class="empty">Tippe einen Namen ein. Früher hinzugefügte Zusatzartikel erscheinen hier.</div>';
+    erg.querySelectorAll('[data-art]').forEach(b => b.onclick = async () => {
+      const a = artById(+b.dataset.art), p = posFor(a.id);
+      await setzePos({ a, p }, { aufnehmen: true, menge_fix: (p && p.menge_fix) || Math.max(1, grund(a).menge) });
+      toast(`«${a.name}» hinzugefügt.`); zeige();
+    });
+    erg.querySelectorAll('[data-frueher]').forEach(b => b.onclick = () => {
+      const f = frueher.find(x => x.freitext === b.dataset.frueher);
+      zusatzDialog(f.freitext, f.kategorie, f.laden, zeige);
+    });
+    const e1 = $('[data-einmal]', erg); if (e1) e1.onclick = () => zusatzDialog(inp.value.trim(), null, null, () => { inp.value = ''; zeige(); });
+    const e2 = $('[data-neuart]', erg); if (e2) e2.onclick = () => { ov.remove(); artikelDialog(null, { name: inp.value.trim() }, null, true); };
+  }
+  inp.oninput = zeige; zeige(); setTimeout(() => inp.focus(), 50);
+}
+
+function zusatzDialog(name, kat, laden, danach) {
+  const ov = dialog(`<h2>Nur diese Woche</h2>
+    <div class="field"><label for="zName">Artikel</label><input type="text" id="zName" value="${esc(name)}"></div>
+    <div class="two">
+      <div class="field"><label for="zMenge">Menge</label><input type="number" id="zMenge" min="1" value="1" inputmode="numeric"></div>
+      <div class="field"><label for="zLaden">Laden</label><select id="zLaden">${LAEDEN.map(l => `<option ${l === (laden || 'Migros') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label for="zKat">Kategorie</label><input type="text" id="zKat" list="katListe" value="${esc(kat || '')}" placeholder="z. B. Gemüse"><div class="hint">Unter dieser Kategorie kannst du den Artikel nächstes Mal wieder ankreuzen.</div></div>
+    <datalist id="katListe">${kategorien().map(k => `<option value="${esc(k)}">`).join('')}</datalist>
+    <div class="err" id="zErr"></div>
+    <div class="actions"><button class="btn" data-close>Abbrechen</button><button class="btn primary" id="zOk">Hinzufügen</button></div>`);
+  $('#zOk', ov).onclick = async () => {
+    const n = $('#zName', ov).value.trim(), k = $('#zKat', ov).value.trim();
+    if (!n) return $('#zErr', ov).textContent = 'Bitte einen Namen eingeben.';
+    if (!k) return $('#zErr', ov).textContent = 'Bitte eine Kategorie angeben.';
+    try {
+      const p = await S.api.positionNeu({ einkauf_id: S.einkauf.id, freitext: n, kategorie: k, laden: $('#zLaden', ov).value, menge_fix: Math.max(1, Math.round(toNum($('#zMenge', ov).value) || 1)) });
+      S.pos.push(p); S.frueher.unshift({ freitext: n, kategorie: k, laden: p.laden });
+      ov.remove(); toast(`«${n}» hinzugefügt.`); render(); if (danach) danach();
+    } catch (e) { fehler(e); }
+  };
+}
+
+function abschliessenDialog() {
+  const { liste } = berechneListe();
+  const gekauft = liste.filter(i => i.p && i.p.gekauft), offen = liste.length - gekauft.length;
+  const bestandBuchung = gekauft.filter(i => i.a && isNum(i.a.bestand));
+  const ov = dialog(`<h2>Einkauf abschliessen?</h2>
+    <p>${gekauft.length} Artikel abgehakt${offen ? `, ${offen} nicht abgehakt` : ''}.</p>
+    ${bestandBuchung.length ? `<p>Der Bestand von ${bestandBuchung.length} Vorratsartikel${bestandBuchung.length > 1 ? 'n' : ''} wird um die gekaufte Menge erhöht.</p>` : ''}
+    <p class="sum">Nicht abgehakte Artikel erscheinen nächste Woche wieder, wenn sie noch fällig sind. Wochenanpassungen werden zurückgesetzt.</p>
+    <div class="actions"><button class="btn" data-close>Abbrechen</button><button class="btn primary" id="aOk">Abschliessen</button></div>`);
+  $('#aOk', ov).onclick = async () => {
+    $('#aOk', ov).disabled = true;
+    try {
+      for (const i of bestandBuchung) await S.api.artikelAendern(i.a.id, { bestand: i.a.bestand + i.menge });
+      await S.api.einkaufAbschliessen(S.einkauf.id);
+      ov.remove(); await laden(); toast('Einkauf abgeschlossen. Neue Liste gestartet.');
+    } catch (e) { fehler(e); $('#aOk', ov).disabled = false; }
+  };
+}
+
+/* ===== Vorrat & Artikel ===== */
+const FILTER = [
+  ['alle', 'Alle'], ['routine', 'Routine'], ['aktion', 'Nur Aktion'], ['ohneMin', 'Ohne Mindestbestand'],
+  ['unterMin', 'Unter Minimum'], ['ohneKat', 'Ohne Kategorie'], ['ohneLaden', 'Ohne Standardladen'],
+];
+function filterFn(f) {
+  return {
+    alle: () => true, routine: a => a.routine, aktion: a => a.nur_aktion,
+    ohneMin: a => !isNum(a.mindestbestand) && !a.routine, unterMin: a => grund(a).grund === 'Nachkaufen',
+    ohneKat: a => !a.kategorie, ohneLaden: a => !a.standardladen,
+  }[f];
+}
+function renderArtikel(main) {
+  const q = S.suche.trim().toLowerCase();
+  const arts = S.artikel.filter(a => (!q || a.name.toLowerCase().includes(q)) && filterFn(S.filter)(a));
+  let html = `<input class="search" id="aSuche" placeholder="Artikel suchen …" value="${esc(S.suche)}" autocomplete="off">
+    <div class="chips">${FILTER.map(([k, t]) => `<button class="chip" data-f="${k}" aria-pressed="${S.filter === k}">${t} (${S.artikel.filter(filterFn(k)).length})</button>`).join('')}</div>
+    <p class="sum">Bestand und Mindestbestand direkt eintippen, sie werden sofort gespeichert. Für alles andere auf den Namen tippen.</p>`;
+  if (!arts.length) html += `<div class="card"><div class="empty">Keine Artikel gefunden.</div></div>`;
+  const g = gruppiere(arts.sort((x, y) => coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)), a => a.kategorie || OHNE_KAT);
+  for (const [kat, as] of g) {
+    html += `<h2>${esc(kat)} <span class="sum">${as.length}</span></h2><div class="card">`;
+    for (const a of as) {
+      const gr = grund(a);
+      html += `<div class="row" data-id="${a.id}">
+        <div class="main"><button class="linkish" data-edit><div class="name">${esc(a.name)}</div>
+          <div class="meta">${a.standardladen ? ladenPill(a.standardladen) : '<span class="tag warn">kein Standardladen</span>'}
+          ${a.routine ? ` <span class="tag">Routine ${fmt(a.routine_menge)}/Wo</span>` : ''}${a.nur_aktion ? ' <span class="tag">nur Aktion</span>' : ''}${gr.grund === 'Nachkaufen' ? ' <span class="tag warn">unter Minimum</span>' : ''}</div></button></div>
+        <label class="numlabel">Bestand<input class="num" type="number" min="0" step="any" inputmode="decimal" data-feld="bestand" value="${fmt(a.bestand).replace(',', '.')}"></label>
+        <label class="numlabel">Minimum<input class="num" type="number" min="0" step="any" inputmode="decimal" data-feld="mindestbestand" value="${fmt(a.mindestbestand).replace(',', '.')}"></label>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+  html += `<div class="footer-actions"><button class="btn" id="export">Tabelle exportieren (Excel/CSV)</button></div>
+    <button class="btn primary fab" id="neu">+ Neuer Artikel</button>`;
+  main.innerHTML = html;
+
+  const s = $('#aSuche');
+  s.oninput = () => { S.suche = s.value; const pos = s.selectionStart; render(); const n = $('#aSuche'); n.focus(); n.setSelectionRange(pos, pos); };
+  main.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { S.filter = b.dataset.f; render(); });
+  main.querySelectorAll('.row[data-id]').forEach(row => {
+    const a = artById(+row.dataset.id);
+    $('[data-edit]', row).onclick = () => artikelDialog(a);
+    row.querySelectorAll('input[data-feld]').forEach(inp => inp.onchange = () => {
+      const v = toNum(inp.value);
+      if (v !== null && (Number.isNaN(v) || v < 0)) { toast('Bitte eine Zahl ab 0 eingeben.'); inp.value = fmt(a[inp.dataset.feld]).replace(',', '.'); return; }
+      setzeArtikel(a, { [inp.dataset.feld]: v });
+    });
+  });
+  $('#neu').onclick = () => artikelDialog(null);
+  $('#export').onclick = exportCsv;
+}
+
+/* Artikel anlegen / bearbeiten – alle Felder, damit die Tabelle vollständig bleibt */
+function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
+  const neu = !a; const v = Object.assign({ laeden: [], routine: null, nur_aktion: false }, a || vorlage);
+  const ov = dialog(`<h2>${neu ? 'Neuer Artikel' : 'Artikel bearbeiten'}</h2>
+    <form id="aForm" novalidate>
+    <div class="field"><label for="fName">Name *</label><input type="text" id="fName" value="${esc(v.name || '')}" placeholder="z. B. M-Classic Thon"></div>
+    <div class="field"><label for="fKat">Kategorie *</label><input type="text" id="fKat" list="katListe2" value="${esc(v.kategorie || '')}" placeholder="Auswählen oder neue eintippen">
+      <datalist id="katListe2">${kategorien().map(k => `<option value="${esc(k)}">`).join('')}</datalist></div>
+    <div class="field"><div class="lbl">Erhältlich bei</div><div class="opts">${LAEDEN.map(l => `<label class="opt"><input type="checkbox" name="laeden" value="${esc(l)}" ${(v.laeden || []).includes(l) ? 'checked' : ''}>${esc(l)}</label>`).join('')}</div></div>
+    <div class="field"><label for="fStd">Standardladen *</label><select id="fStd"><option value="">– wählen –</option>${LAEDEN.map(l => `<option ${l === v.standardladen ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+      <div class="hint">Dort landet der Artikel automatisch auf der Liste.</div></div>
+    <div class="field"><div class="lbl">Nur in Aktion kaufen?</div><div class="opts">
+      <label class="opt"><input type="radio" name="aktion" value="nein" ${!v.nur_aktion ? 'checked' : ''}>Nein</label>
+      <label class="opt"><input type="radio" name="aktion" value="ja" ${v.nur_aktion ? 'checked' : ''}>Ja</label></div></div>
+    <div class="field"><div class="lbl">Routine-Einkauf? *</div><div class="opts">
+      <label class="opt"><input type="radio" name="routine" value="nein" ${v.routine === false ? 'checked' : ''}>Nein</label>
+      <label class="opt"><input type="radio" name="routine" value="ja" ${v.routine === true ? 'checked' : ''}>Ja, jede Woche</label></div></div>
+    <div class="field" id="fRmWrap"><label for="fRm">Routine-Menge pro Woche *</label><input type="number" id="fRm" min="1" step="1" inputmode="numeric" value="${fmt(v.routine_menge)}"></div>
+    <div class="two">
+      <div class="field"><label for="fBest">Bestand aktuell</label><input type="number" id="fBest" min="0" step="any" inputmode="decimal" value="${fmt(v.bestand).replace(',', '.')}"></div>
+      <div class="field"><label for="fMin">Mindestbestand</label><input type="number" id="fMin" min="0" step="any" inputmode="decimal" value="${fmt(v.mindestbestand).replace(',', '.')}"></div>
+    </div>
+    <div class="field"><label for="fBem">Bemerkung</label><input type="text" id="fBem" value="${esc(v.bemerkung || '')}"></div>
+    ${neu && !ausPosition ? `<label class="opt" style="margin-top:4px"><input type="checkbox" id="fAufListe" ${aufListe ? 'checked' : ''}>Auch gleich auf die Einkaufsliste dieser Woche</label>` : ''}
+    <div class="err" id="fErr"></div>
+    <div class="actions">
+      ${!neu ? `<button type="button" class="btn danger" id="fDel">Löschen</button><span class="spacer"></span>` : ''}
+      <button type="button" class="btn" data-close>Abbrechen</button><button type="submit" class="btn primary" id="fOk">${neu ? 'Artikel anlegen' : 'Speichern'}</button>
+    </div></form>`);
+  const rmWrap = $('#fRmWrap', ov);
+  const sync = () => { rmWrap.style.display = ov.querySelector('input[name=routine]:checked')?.value === 'ja' ? '' : 'none'; };
+  ov.querySelectorAll('input[name=routine]').forEach(r => r.onchange = sync); sync();
+  // Standardladen gilt automatisch als "erhältlich bei"
+  $('#fStd', ov).onchange = e => { const cb = ov.querySelector(`input[name=laeden][value="${e.target.value}"]`); if (cb) cb.checked = true; };
+
+  $('#aForm', ov).onsubmit = async ev => {
+    ev.preventDefault();
+    const err = m => { $('#fErr', ov).textContent = m; };
+    const name = $('#fName', ov).value.trim(), kategorie = $('#fKat', ov).value.trim(), standardladen = $('#fStd', ov).value;
+    const routineV = ov.querySelector('input[name=routine]:checked')?.value;
+    const laeden = [...ov.querySelectorAll('input[name=laeden]:checked')].map(c => c.value);
+    const rm = toNum($('#fRm', ov).value), best = toNum($('#fBest', ov).value), min = toNum($('#fMin', ov).value);
+    if (!name) return err('Bitte einen Namen eingeben.');
+    if (S.artikel.some(x => x !== a && x.name.trim().toLowerCase() === name.toLowerCase())) return err('Diesen Artikel gibt es schon.');
+    if (!kategorie) return err('Bitte eine Kategorie angeben.');
+    if (!standardladen) return err('Bitte einen Standardladen wählen.');
+    if (!routineV) return err('Bitte angeben, ob es ein Routine-Einkauf ist.');
+    if (routineV === 'ja' && !(rm >= 1 && Number.isInteger(rm))) return err('Bitte die Routine-Menge pro Woche angeben (ganze Zahl ab 1).');
+    for (const [n, x] of [['Bestand', best], ['Mindestbestand', min]]) if (x !== null && (Number.isNaN(x) || x < 0)) return err(`${n}: bitte eine Zahl ab 0.`);
+    if (!laeden.includes(standardladen)) laeden.push(standardladen);
+    const obj = {
+      name, kategorie, standardladen, laeden: LAEDEN.filter(l => laeden.includes(l)),
+      nur_aktion: ov.querySelector('input[name=aktion]:checked').value === 'ja',
+      routine: routineV === 'ja', routine_menge: routineV === 'ja' ? rm : null,
+      bestand: best, mindestbestand: min, bemerkung: $('#fBem', ov).value.trim() || null,
+    };
+    $('#fOk', ov).disabled = true;
+    try {
+      if (neu) {
+        const n = await S.api.artikelNeu(obj); S.artikel.push(n);
+        if (ausPosition) { await S.api.positionLoeschen(ausPosition.id); S.pos = S.pos.filter(p => p !== ausPosition); }
+        if (ausPosition || $('#fAufListe', ov)?.checked) {
+          const p = await S.api.positionNeu({ einkauf_id: S.einkauf.id, artikel_id: n.id, aufnehmen: true, menge_fix: ausPosition ? ausPosition.menge_fix || 1 : Math.max(1, grund(n).menge) });
+          S.pos.push(p);
+        }
+        toast(`«${n.name}» angelegt.`);
+      } else {
+        Object.assign(a, await S.api.artikelAendern(a.id, obj)); toast('Gespeichert.');
+      }
+      ov.remove(); render();
+    } catch (e) { $('#fOk', ov).disabled = false; err('Speichern fehlgeschlagen: ' + e.message); }
+  };
+  if (!neu) $('#fDel', ov).onclick = () => {
+    const c = dialog(`<h2>«${esc(a.name)}» löschen?</h2><p>Der Artikel verschwindet aus Vorrat und Listen.</p>
+      <div class="actions"><button class="btn" data-close>Abbrechen</button><button class="btn danger" id="dOk">Löschen</button></div>`);
+    $('#dOk', c).onclick = async () => {
+      try { await S.api.artikelAendern(a.id, { aktiv: false }); S.artikel = S.artikel.filter(x => x !== a); c.remove(); ov.remove(); toast('Gelöscht.'); render(); }
+      catch (e) { fehler(e); }
+    };
+  };
+  setTimeout(() => (neu ? $('#fName', ov) : null)?.focus(), 50);
+}
+
+function exportCsv() {
+  const kopf = ['Produkt', ...LAEDEN, 'Standardladen', 'Nur in Aktion', 'Routine', 'Routine-Menge / Woche', 'Bestand aktuell', 'Mindestbestand', 'Kategorie', 'Bemerkung'];
+  const zelle = v => { const s = v === null || v === undefined ? '' : String(v); return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const zeilen = S.artikel.slice().sort((x, y) => coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)).map(a => [
+    a.name, ...LAEDEN.map(l => (a.laeden || []).includes(l) ? 'x' : ''), a.standardladen, a.nur_aktion ? 'ja' : 'nein', a.routine ? 'ja' : 'nein',
+    a.routine_menge, fmt(a.bestand), fmt(a.mindestbestand), a.kategorie, a.bemerkung]);
+  const csv = '﻿' + [kopf, ...zeilen].map(r => r.map(zelle).join(';')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url; link.download = 'vorrat-' + new Date().toISOString().slice(0, 10) + '.csv';
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  toast('Tabelle exportiert.');
+}
+
+/* ---------- Dialog / Toast ---------- */
+function dialog(inner) {
+  const ov = document.createElement('div');
+  ov.className = 'overlay';
+  ov.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${inner}</div>`;
+  ov.addEventListener('click', e => { if (e.target === ov || e.target.closest('[data-close]')) ov.remove(); });
+  document.body.appendChild(ov);
+  return ov;
+}
+let toastTimer;
+function toast(text, aktion, fn) {
+  document.querySelectorAll('.toast').forEach(t => t.remove());
+  const t = document.createElement('div'); t.className = 'toast';
+  t.innerHTML = `<span>${esc(text)}</span>${aktion ? `<button>${esc(aktion)}</button>` : ''}`;
+  if (aktion) $('button', t).onclick = () => { t.remove(); fn(); };
+  document.body.appendChild(t);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), aktion ? 7000 : 2500);
+}
+function fehler(e) {
+  console.error(e);
+  toast(e && e.status === 401 ? 'Zugang ungültig. Bitte den App-Link neu öffnen.' : 'Fehler beim Speichern: ' + (e && e.message || e));
+}
+
+/* ---------- Start ---------- */
+async function laden() {
+  try {
+    const [artikel, einkaufAlt, frueher] = await Promise.all([S.api.artikel(), S.api.offenerEinkauf(), S.api.fruehereZusatz()]);
+    S.artikel = artikel; S.frueher = frueher || [];
+    S.einkauf = einkaufAlt || await S.api.einkaufNeu();
+    S.pos = await S.api.positionen(S.einkauf.id);
+    render();
+  } catch (e) {
+    if (e.status === 401 || e.status === 403) { store.del(KEY_STORE); return einrichten('Der gespeicherte Zugang funktioniert nicht mehr. Bitte den App-Link erneut öffnen.'); }
+    $('#root').innerHTML = `<div class="setup"><h1>Keine Verbindung</h1><p>${esc(e.message)}</p><button class="btn primary" onclick="location.reload()">Nochmals versuchen</button></div>`;
+  }
+}
+
+function einrichten(meldung) {
+  $('#root').innerHTML = `<div class="setup"><img src="icon-192.png" alt="" onerror="this.remove()"><h1>Einkauf & Vorrat</h1>
+    <p>${esc(meldung || 'Einmalig: Bitte den App-Link öffnen, den du bekommen hast, oder den Zugangsschlüssel hier einfügen.')}</p>
+    <input id="schl" placeholder="sb_publishable_…" autocomplete="off"><div class="err" id="sErr"></div>
+    <button class="btn primary" id="sOk">Speichern und öffnen</button></div>`;
+  $('#sOk').onclick = async () => {
+    const k = $('#schl').value.trim();
+    if (!k) return;
+    try { await restApi(k).pruefen(); store.set(KEY_STORE, k); S.api = restApi(k); laden(); }
+    catch (e) { $('#sErr').textContent = 'Dieser Schlüssel funktioniert nicht.'; }
+  };
+}
+
+(function start() {
+  if (/[?&]demo\b/.test(location.search)) { S.api = demoApi(); return laden(); }
+  const ausLink = decodeURIComponent((location.hash || '').slice(1)).trim();
+  if (ausLink.startsWith('sb_publishable_')) {
+    store.set(KEY_STORE, ausLink);
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  }
+  const k = ausLink.startsWith('sb_publishable_') ? ausLink : store.get(KEY_STORE);
+  if (!k) return einrichten();
+  S.api = restApi(k); laden();
+})();
+</script>
+</body>
+</html>
