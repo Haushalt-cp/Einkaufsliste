@@ -170,6 +170,26 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch (e) {} },
 };
 
+/* ---------- Suche: findet Wortteile überall, alle Suchwörter in beliebiger Reihenfolge, Umlaute und Schweizer Varianten ---------- */
+const normText = t => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ß/g, 'ss').replace(/[^a-z0-9]+/g, ' ').trim();
+const VARIANTEN = [
+  ['schoko', 'schoggi', 'choco', 'schokolade', 'chocolat', 'cioccolat'], ['joghurt', 'jogurt', 'yoghurt', 'yogurt'], ['guetzli', 'guezli', 'keks', 'biscuit', 'cookie'],
+  ['ruebli', 'karotte', 'moehre'], ['rahm', 'sahne', 'creme'], ['poulet', 'huhn', 'haehnchen', 'chicken'], ['zucchetti', 'zucchini'], ['peperoni', 'paprika'],
+  ['kartoffel', 'erdapfel', 'herdopfel'], ['broetchen', 'brötli', 'semmel', 'weggli'], ['wc papier', 'toilettenpapier', 'klopapier'], ['nuesse', 'nuss'],
+  ['fleischkaese', 'leberkaese'], ['glace', 'eis', 'glace'], ['konfituere', 'marmelade', 'konfi'], ['muesli', 'musli', 'muesli', 'granola'],
+].map(g => g.map(normText));
+function suchMuster(q) {
+  return normText(q).split(' ').filter(Boolean).map(w => {
+    const g = VARIANTEN.find(v => v.some(x => x.startsWith(w) || w.startsWith(x)));
+    return g ? [w, ...g.filter(x => x.length >= 4)] : [w];
+  });
+}
+function passtSuche(text, muster) {
+  if (!muster.length) return true;
+  const t = normText(text);
+  return muster.every(alternativen => alternativen.some(w => t.includes(w)));
+}
+
 /* ---------- Datenzugriff (Supabase REST) ---------- */
 function restApi(tokenHolen) {
   const base = SUPABASE_URL + '/rest/v1/';
@@ -616,8 +636,9 @@ function hinzufuegenDialog() {
   function zeige() {
     const q = inp.value.trim().toLowerCase();
     const aufListe = new Set(berechneListe().liste.filter(i => i.a).map(i => i.a.id));
-    const treffer = S.artikel.filter(a => !q || a.name.toLowerCase().includes(q)).sort((x, y) => coll.compare(x.name, y.name)).slice(0, q ? 30 : 0);
-    const zus = frueher.filter(f => (!q || f.freitext.toLowerCase().includes(q)) && !S.pos.some(p => !p.artikel_id && p.freitext.toLowerCase() === f.freitext.toLowerCase()));
+    const m = suchMuster(q);
+    const treffer = S.artikel.filter(a => !q || passtSuche(a.name + ' ' + (a.kategorie || ''), m)).sort((x, y) => coll.compare(x.name, y.name)).slice(0, q ? 30 : 0);
+    const zus = frueher.filter(f => (!q || passtSuche(f.freitext + ' ' + (f.kategorie || ''), m)) && !S.pos.some(p => !p.artikel_id && p.freitext.toLowerCase() === f.freitext.toLowerCase()));
     let h = '';
     for (const a of treffer) h += `<div class="result"><div class="main"><div class="name">${esc(a.name)}</div><div class="meta">${a.standardladen ? ladenPill(a.standardladen) : ''} ${esc(a.kategorie || '')}</div></div>
       ${aufListe.has(a.id) ? '<span class="tag">auf Liste</span>' : `<button class="btn small" data-art="${a.id}">+</button>`}</div>`;
@@ -740,14 +761,17 @@ function renderAktionen(main) {
   const basis = nochNicht ? aktiv.filter(x => x.laden === S.akLaden) : proLaden(S.akLaden);
   const zeitraum = (() => { const v = basis.map(x => x.gueltig_von).filter(Boolean).sort(), b = basis.map(x => x.gueltig_bis).filter(Boolean).sort();
     return v.length && b.length ? `${datumKurz(v[v.length - 1] <= tag ? v[v.length - 1] : v[0])} – ${datumKurz(b[0] >= tag ? b[0] : b[b.length - 1])}` : ''; })();
-  let liste = basis.filter(x => !q || (x.name + ' ' + (x.beschreibung || '')).toLowerCase().includes(q));
+  const sm = suchMuster(q);
+  // Mit Suchbegriff: über alle Läden suchen
+  let liste = q ? (amTag.length ? amTag : aktiv).filter(x => passtSuche(x.name + ' ' + (x.beschreibung || '') + ' ' + (x.kategorie || ''), sm))
+                : basis;
   if (S.akFilter === 'meine') liste = liste.filter(x => passenderArtikel(x));
   if (S.akFilter === 'liste') liste = liste.filter(x => aktionPosition(x));
   let html = `<div class="wochenkopf"><div class="wk-gross">Aktionen für den Einkauf am ${esc(datumLang(tag))}</div>
       <div class="wk-klein">${esc(S.akLaden)}${zeitraum ? ` · gültig ${esc(zeitraum)}` : ''}</div></div>
     ${nochNicht ? `<div class="hinweis warn">Die ${esc(S.akLaden)}-Aktionen für ${esc(datumLang(tag))} sind noch nicht veröffentlicht${S.akLaden === 'Migros' ? ' (meist ab Dienstag/Mittwoch)' : S.akLaden === 'Lidl' ? ' (meist ab Montag)' : ' (meist ab Dienstag)'}. Angezeigt werden die aktuell gültigen Aktionen – bitte die Daten beachten.</div>` : ''}
     <div class="chips">${['Migros', 'Denner', 'Lidl'].map(l => `<button class="chip" data-akl="${l}" aria-pressed="${S.akLaden === l}">${l} (${proLaden(l).length || aktiv.filter(x => x.laden === l).length})</button>`).join('')}</div>
-    <input class="search" id="akSuche" placeholder="In den Aktionen suchen …" value="${esc(S.akSuche)}" autocomplete="off">
+    <input class="search" id="akSuche" placeholder="In allen Aktionen suchen, z. B. Schoko …" value="${esc(S.akSuche)}" autocomplete="off">
     <div class="chips">${[['alle', 'Alle'], ['meine', 'Passt zu meinen Artikeln'], ['liste', 'Auf der Liste']].map(([k, t]) => `<button class="chip" data-akf="${k}" aria-pressed="${S.akFilter === k}">${t}</button>`).join('')}</div>
     <p class="sum">${zeit ? `Stand: ${zeit.toLocaleDateString('de-CH')} ${zeit.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })}. Wird Di und Mi automatisch aktualisiert.` : 'Noch keine Aktionen geladen.'}
       <button class="btn small" id="akNeu" style="margin-left:6px">Jetzt aktualisieren</button></p>`;
@@ -760,9 +784,13 @@ function renderAktionen(main) {
     for (const ak of items) h += aktionZeile(ak);
     return h + '</div>';
   };
-  if (S.akFilter !== 'meine' && meine.length) html += block('Passt zu deinen Artikeln', meine);
+  if (q) {
+    // Suchergebnisse aus allen Läden, nach Laden gruppiert
+    html += `<p class="sum">${liste.length} Treffer für «${esc(S.akSuche.trim())}» in allen Läden.</p>`;
+    for (const l of ['Migros', 'Denner', 'Lidl']) html += block(l, liste.filter(x => x.laden === l).sort((x, y) => (!!passenderArtikel(y) - !!passenderArtikel(x)) || coll.compare(x.name, y.name)));
+  } else if (S.akFilter !== 'meine' && meine.length) html += block('Passt zu deinen Artikeln', meine);
   else if (S.akFilter === 'meine') html += block('Passt zu deinen Artikeln', meine);
-  if (S.akFilter !== 'meine') {
+  if (!q && S.akFilter !== 'meine') {
     const nonFood = k => /bekleidung|baby|kind|spiel|hobby|beauty|gesundheit|wohn|garten|elektron|sport|tier|blumen|freizeit|reise|multimedia|schuh|accessoires|sonstiges/i.test(k || '') ? 1 : 0;
     const g = gruppiere(rest.sort((x, y) => (nonFood(x.kategorie) - nonFood(y.kategorie)) || coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)), x => x.kategorie || 'Weitere Aktionen');
     for (const [k, its] of g) html += block(k, its);
@@ -888,7 +916,8 @@ function renderArtikel(main) {
   const q = S.suche.trim().toLowerCase();
   const filter = admin ? FILTER : FILTER.filter(f => ['alle', 'unterMin', 'ohneBestand'].includes(f[0]));
   S.filter = 'alle';
-  const arts = S.artikel.filter(a => (!q || a.name.toLowerCase().includes(q)) && filterFn(S.filter)(a));
+  const sm = suchMuster(q);
+  const arts = S.artikel.filter(a => (!q || passtSuche(a.name + ' ' + (a.kategorie || '') + ' ' + (a.bemerkung || ''), sm)) && filterFn(S.filter)(a));
   const minZeigen = admin && store.get('einkauf-min-zeigen') !== 'nein';
   let html = `<input class="search" id="aSuche" placeholder="Artikel suchen …" value="${esc(S.suche)}" autocomplete="off">
     <p class="sum">${admin ? `Bestand${minZeigen ? ' und Minimum' : ''} mit − / + anpassen. «Liste» setzt den Artikel mit der Anzahl direkt auf die Einkaufsliste. Für alles andere auf den Namen tippen.
