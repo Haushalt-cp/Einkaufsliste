@@ -114,6 +114,10 @@
   .zaehler .zlbl { font-size: 12px; color: var(--muted); margin-right: 4px; }
   .zaehler .iconbtn { border: 1.5px solid var(--line); background: #fff; width: 32px; height: 32px; color: var(--ink); }
   .zaehler .num { width: 44px; padding: 5px 2px; }
+  .zaehler.liste { flex-basis: 100%; background: #fff4ea; border: 1.5px dashed #f3c49a; border-radius: 10px; padding: 4px 8px; }
+  .zaehler.liste.aktiv { background: #ffe3c7; border-style: solid; border-color: #e8730c; }
+  .zaehler.liste .zlbl { color: #7a3d00; font-weight: 600; font-size: 13px; flex: 1; }
+  .zaehler.liste .lstk { font-size: 12px; color: #7a3d00; margin-left: 4px; }
   .zaehler.liste .lzahl { min-width: 30px; text-align: center; font-weight: 700; }
   .zaehler.liste .iconbtn { border-color: #f3c49a; color: #7a3d00; }
   .zaehler.liste.aktiv .lzahl { color: #e8730c; }
@@ -123,6 +127,8 @@
   .wochenkopf { background: var(--ink); color: #fff; border-radius: var(--radius); padding: 12px 14px; margin: 4px 0 10px; }
   .wk-gross { font-size: 19px; font-weight: 800; line-height: 1.25; }
   .wk-klein { font-size: 14px; opacity: .85; margin-top: 2px; }
+  .ak-box { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .ak-lbl { font-size: 11px; font-weight: 600; color: #7a3d00; text-align: center; max-width: 110px; line-height: 1.2; }
   .ak-stepper { border: 1.5px solid var(--line); border-radius: 10px; background: #fff; }
   .ak-stepper.aktiv { border-color: #e2574c; }
   .ak-stepper .iconbtn:disabled { opacity: .3; }
@@ -825,7 +831,7 @@ function aktionZeile(ak) {
       <div class="preis">${preis}</div>
       ${a ? `<div class="meta">Dein Artikel: <b>${esc(a.name)}</b> · ${vorratText(a)}${oftGekauft(a) ? ' <span class="tag">kaufst du regelmässig</span>' : ''}</div>` : ''}
     </div>
-    <div class="stepper ak-stepper${p ? ' aktiv' : ''}" title="Anzahl auf der Einkaufsliste"><button class="iconbtn" data-akd="-1" aria-label="Weniger" ${p ? '' : 'disabled'}>−</button><span>${menge}</span><button class="iconbtn" data-akd="1" aria-label="Mehr">+</button></div>
+    <div class="ak-box"><span class="ak-lbl">${p ? 'Auf der Einkaufsliste' : 'Auf die Einkaufsliste'}</span><div class="stepper ak-stepper${p ? ' aktiv' : ''}" title="Anzahl auf der Einkaufsliste"><button class="iconbtn" data-akd="-1" aria-label="Weniger" ${p ? '' : 'disabled'}>−</button><span>${menge}</span><button class="iconbtn" data-akd="1" aria-label="Mehr">+</button></div></div>
   </div>`;
 }
 
@@ -892,10 +898,10 @@ function aktualisiereZeile(row, a) {
 function listenMenge(a, liste) { const i = (liste || berechneListe().liste).find(x => x.a === a); return i ? i.menge : 0; }
 function listenZaehler(a) {
   const n = listenMenge(a);
-  return `<div class="zaehler liste${n ? ' aktiv' : ''}"><span class="zlbl">Liste</span>
-    <button class="iconbtn" data-liste="-1" aria-label="Weniger auf die Liste" ${n ? '' : 'disabled'}>−</button>
+  return `<div class="zaehler liste${n ? ' aktiv' : ''}"><span class="zlbl">${n ? 'Auf der Einkaufsliste:' : 'Auf die Einkaufsliste:'}</span>
+    <button class="iconbtn" data-liste="-1" aria-label="Weniger auf die Einkaufsliste" ${n ? '' : 'disabled'}>−</button>
     <span class="lzahl">${n}</span>
-    <button class="iconbtn" data-liste="1" aria-label="Mehr auf die Liste">+</button></div>`;
+    <button class="iconbtn" data-liste="1" aria-label="Mehr auf die Einkaufsliste">+</button>${n ? '<span class="lstk">Stück</span>' : ''}</div>`;
 }
 async function aufListeAendern(a, d, liste) {
   const item = (liste || []).find(x => x.a === a), p = posFor(a.id);
@@ -920,7 +926,7 @@ function renderArtikel(main) {
   const arts = S.artikel.filter(a => (!q || passtSuche(a.name + ' ' + (a.kategorie || '') + ' ' + (a.bemerkung || ''), sm)) && filterFn(S.filter)(a));
   const minZeigen = admin && store.get('einkauf-min-zeigen') !== 'nein';
   let html = `<input class="search" id="aSuche" placeholder="Artikel suchen …" value="${esc(S.suche)}" autocomplete="off">
-    <p class="sum">${admin ? `Bestand${minZeigen ? ' und Minimum' : ''} mit − / + anpassen. «Liste» setzt den Artikel mit der Anzahl direkt auf die Einkaufsliste. Für alles andere auf den Namen tippen.
+    <p class="sum">${admin ? `Bestand${minZeigen ? ' und Minimum' : ''} mit − / + anpassen. Im orangen Feld setzt + den Artikel mit der gewünschten Anzahl auf die Einkaufsliste. Für alles andere auf den Namen tippen.
       <button class="btn small" id="minUmschalten" style="margin-left:6px">${minZeigen ? 'Minimum ausblenden' : 'Minimum einblenden'}</button>` : 'Bestand mit − / + anpassen, wenn etwas aufgebraucht oder dazugekommen ist. Das wird sofort gespeichert.'}</p>`;
   if (!arts.length) html += `<div class="card"><div class="empty">Keine Artikel gefunden.</div></div>`;
   const g = gruppiere(arts.sort((x, y) => coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)), a => a.kategorie || OHNE_KAT);
