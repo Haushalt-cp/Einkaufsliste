@@ -1,4 +1,4 @@
-// Holt die Wochenaktionen von Denner (denner.ch + aktionis.ch) und Migros (aktionis.ch)
+// Holt die Wochenaktionen von Denner (denner.ch + aktionis.ch) und Migros (migros.ch, Region Aare; Notfall aktionis.ch)
 // und speichert sie in aktion_abruf / aktion_angebot.
 // Aufruf: zeitgesteuert (Header x-abruf-token) oder von einem Admin der App (Login-Token).
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -148,6 +148,88 @@ async function aktionis(haendler: string, muster: RegExp): Promise<Angebot[]> {
   return alle;
 }
 
+/* ---------- Migros direkt (Genossenschaft Aare, Code gmaa) ---------- */
+const MIGROS_REGION = "gmaa";
+// Naechster Einkaufstag (Donnerstag, Schweizer Zeit); heute, falls heute Donnerstag
+function einkaufstag(): string {
+  const jetzt = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Zurich" }));
+  const diff = (4 - jetzt.getDay() + 7) % 7;
+  jetzt.setDate(jetzt.getDate() + diff);
+  return `${jetzt.getFullYear()}-${String(jetzt.getMonth() + 1).padStart(2, "0")}-${String(jetzt.getDate()).padStart(2, "0")}`;
+}
+async function migrosDirekt(): Promise<Angebot[]> {
+  const kopf: Record<string, string> = {
+    "User-Agent": UA, "Accept": "application/json, text/plain, */*", "Accept-Language": "de-CH,de;q=0.9",
+    "Referer": "https://www.migros.ch/de/offers/home", "Origin": "https://www.migros.ch",
+    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124"', "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin",
+    "migros-language": "de", "peer-id": "website-js-800.0.0",
+  };
+  const g = await fetch("https://www.migros.ch/authentication/public/v1/api/guest?authorizationNotRequired=true", { headers: kopf });
+  const tok = g.headers.get("leshopch");
+  if (!g.ok || !tok) throw new Error(`Migros Gast-Zugang: HTTP ${g.status}`);
+  const h = { ...kopf, "Content-Type": "application/json", leshopch: tok };
+  const post = async (url: string, body: unknown) => {
+    const r = await fetch(url, { method: "POST", headers: h, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
+    return await r.json();
+  };
+  // 1. Alle Aktions-Produkt-IDs der Region (laufend und kommend)
+  const ids = new Set<number>();
+  for (const kommend of [false, true]) {
+    for (let von = 0, total = 1; von < total && von < 4000; von += 100) {
+      const url = "https://www.migros.ch/product-display/public/web/v1/products/promotion/search" + (kommend ? "?forceUpcomingPromotions=true" : "");
+      const r = await post(url, { regionId: MIGROS_REGION, language: "de", from: von, limit: 100, sortFields: [], sortOrder: "asc", filters: {} });
+      total = Number(r.numberOfProducts) || 0;
+      for (const id of r.productIds || []) ids.add(Number(id));
+      if (!(r.productIds || []).length) break;
+    }
+  }
+  // 2. Produktdetails mit dem Angebot, das am Einkaufstag gilt; sonst das aktuelle
+  const tag = einkaufstag();
+  const karten = async (liste: number[], datum?: string) => {
+    const out: Record<string, unknown>[] = [];
+    for (let i = 0; i < liste.length; i += 200) {
+      const filter: Record<string, string> = { storeType: "OFFLINE", region: MIGROS_REGION };
+      if (datum) filter.ongoingOfferDate = `${datum}T00:00:00`;
+      out.push(...await post("https://www.migros.ch/product-display/public/v4/product-cards", { offerFilter: filter, productFilter: { uids: liste.slice(i, i + 200) } }));
+    }
+    return out;
+  };
+  const alle = [...ids];
+  const amTag = await karten(alle, tag);
+  const mitAktion = (k: Record<string, any>) => k?.offer?.promotionPrice && k?.offer?.promotionDateRange;
+  const ohne = amTag.filter((k) => !mitAktion(k)).map((k) => Number(k.uid));
+  const aktuell = ohne.length ? await karten(ohne) : [];
+  const angebote: Angebot[] = [];
+  for (const k of [...amTag, ...aktuell] as Record<string, any>[]) {
+    if (!mitAktion(k)) continue;
+    const o = k.offer;
+    const titel = String(k.title || [k.brand, k.name, k.versioning].filter(Boolean).join(" · "));
+    const badge = (o.badges || []).map((b: Record<string, string>) => b.description).filter(Boolean).join(" · ");
+    angebote.push({
+      quelle_id: String(k.uid),
+      name: titel.replace(/\s*·\s*/g, " · "),
+      beschreibung: [o.quantity, o.quantityPrice].filter(Boolean).join(", ") || null,
+      preis: Number(o.promotionPrice.effectiveValue) || null,
+      preis_alt: Number(o.price?.effectiveValue) || null,
+      rabatt: badge || null,
+      bild_url: (k.images?.[0]?.url || "").replace("{stack}", "small") || null,
+      kategorie: k.breadcrumb?.[0]?.name || null,
+      gueltig_von: o.promotionDateRange.startDate || null,
+      gueltig_bis: o.promotionDateRange.endDate || null,
+    });
+  }
+  return angebote;
+}
+async function migros(): Promise<Angebot[]> {
+  try {
+    const a = await migrosDirekt();
+    if (a.length) return a;
+  } catch (e) { console.error("Migros direkt", e); }
+  return await aktionis("migros", /migros/i);   // Notfall: aktionis.ch (nicht regional)
+}
+
 /* ---------- Speichern ---------- */
 async function abrufen(laden: "Denner" | "Migros", quelle: string, fn: () => Promise<Angebot[]>) {
   const { data: abruf, error } = await db.from("aktion_abruf").insert({ laden, quelle }).select().single();
@@ -186,7 +268,7 @@ Deno.serve(async (req) => {
   if (!(await berechtigt(req))) return antwort({ fehler: "Keine Berechtigung" }, 401);
   const ergebnis = await Promise.all([
     abrufen("Denner", "denner.ch + aktionis.ch", denner),
-    abrufen("Migros", "aktionis.ch", () => aktionis("migros", /migros/i)),
+    abrufen("Migros", "migros.ch Region Aare", migros),
   ]);
   // Alte Abrufe (älter als 3 Wochen) aufräumen
   const grenze = new Date(Date.now() - 21 * 864e5).toISOString();

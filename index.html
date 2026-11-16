@@ -30,6 +30,8 @@
   .tabs { max-width: 760px; margin: 0 auto; display: flex; gap: 4px; padding: 0 14px 8px; }
   .tab { flex: 1; border: 0; background: transparent; padding: 9px; border-radius: 10px; color: var(--muted); font-weight: 600; }
   .tab[aria-selected="true"] { background: var(--accent); color: #fff; }
+  .tab.tab-einkaufen { background: #ffe3c7; color: #7a3d00; }
+  .tab.tab-einkaufen[aria-selected="true"] { background: #e8730c; color: #fff; }
   main { max-width: 760px; margin: 0 auto; padding: 12px 14px 120px; }
   .btn { border: 1.5px solid var(--line); background: var(--card); padding: 9px 14px; border-radius: 10px; font-weight: 600; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -113,6 +115,13 @@
   .zaehler .iconbtn { border: 1.5px solid var(--line); background: #fff; width: 32px; height: 32px; color: var(--ink); }
   .zaehler .num { width: 44px; padding: 5px 2px; }
   .tag.aktion { background: #e2574c; color: #fff; }
+  .wochenkopf { background: var(--ink); color: #fff; border-radius: var(--radius); padding: 12px 14px; margin: 4px 0 10px; }
+  .wk-gross { font-size: 19px; font-weight: 800; line-height: 1.25; }
+  .wk-klein { font-size: 14px; opacity: .85; margin-top: 2px; }
+  .ak-stepper { border: 1.5px solid var(--line); border-radius: 10px; background: #fff; }
+  .ak-stepper.aktiv { border-color: #e2574c; }
+  .ak-stepper .iconbtn:disabled { opacity: .3; }
+  .ak-stepper .iconbtn[data-akd="1"] { color: #e2574c; font-weight: 700; }
   .preis { font-weight: 700; margin-top: 2px; }
   .preis .alt { font-weight: 400; color: var(--muted); font-size: 13px; text-decoration: line-through; }
   .aktionrow.auf { background: #fff6f4; }
@@ -302,14 +311,14 @@ function render() {
   const root = $('#root');
   const y = window.scrollY;
   const admin = S.modus !== 'einkauf';
-  const tabs = admin ? [['liste', 'Planen'], ['aktionen', 'Aktionen'], ['einkaufen', 'Einkaufen'], ['artikel', 'Vorrat']] : [['einkaufen', 'Einkaufen'], ['artikel', 'Vorrat']];
+  const tabs = admin ? [['liste', 'Planen'], ['aktionen', 'Aktionen'], ['artikel', 'Vorrat'], ['einkaufen', 'Einkaufen']] : [['artikel', 'Vorrat'], ['einkaufen', 'Einkaufen']];
   if (!tabs.some(t => t[0] === S.tab)) S.tab = admin ? 'liste' : 'einkaufen';
   root.innerHTML = `
     <header>
       <div class="bar"><h1>${admin ? 'Einkauf & Vorrat' : 'Einkaufsliste'}</h1>
         <button class="iconbtn" id="neuLaden" title="Neu laden" aria-label="Neu laden">↻</button>
         <button class="iconbtn" id="menue" title="Menü" aria-label="Menü">☰</button></div>
-      ${tabs.length ? `<div class="tabs" role="tablist">${tabs.map(([k, t]) => `<button class="tab" role="tab" data-tab="${k}" aria-selected="${S.tab === k}">${t}</button>`).join('')}</div>` : ''}
+      ${tabs.length ? `<div class="tabs" role="tablist">${tabs.map(([k, t]) => `<button class="tab${k === 'einkaufen' ? ' tab-einkaufen' : ''}" role="tab" data-tab="${k}" aria-selected="${S.tab === k}">${t}</button>`).join('')}</div>` : ''}
     </header>
     <main id="main"></main>`;
   root.querySelectorAll('.tab').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; window.scrollTo(0, 0); render(); });
@@ -663,6 +672,12 @@ const woerter = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀
   .filter(w => w.length >= 3 && !STOPP.has(w) && !/^\d/.test(w)).map(stamm);
 const heuteIso = () => new Date().toISOString().slice(0, 10);
 function aktiveAktionen() { const h = heuteIso(); return S.aktionen.filter(x => !x.gueltig_bis || x.gueltig_bis >= h); }
+const isoLokal = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// Nächster Einkaufstag: Donnerstag (heute, falls heute Donnerstag)
+function einkaufstag() { const d = new Date(); d.setDate(d.getDate() + (4 - d.getDay() + 7) % 7); return isoLokal(d); }
+const giltAm = (x, tag) => (!x.gueltig_von || x.gueltig_von <= tag) && (!x.gueltig_bis || x.gueltig_bis >= tag);
+const datumLang = iso => new Date(iso + 'T12:00').toLocaleDateString('de-CH', { weekday: 'long', day: 'numeric', month: 'long' });
+const datumKurz = iso => new Date(iso + 'T12:00').toLocaleDateString('de-CH', { day: 'numeric', month: 'numeric' });
 // Passender Vorratsartikel zu einer Aktion (Wortvergleich, alle Wörter des Artikels müssen vorkommen)
 function passenderArtikel(ak) {
   if (ak._match !== undefined) return ak._match;
@@ -688,14 +703,24 @@ function aktionPosition(ak) {
 const chf = n => isNum(n) ? n.toFixed(2) : (n ? String(n) : '');
 
 function renderAktionen(main) {
-  const alle = aktiveAktionen();
-  const zeit = alle.length ? new Date(Math.max(...alle.map(x => new Date(x.abgerufen_am).getTime()))) : null;
+  const tag = einkaufstag();
+  const aktiv = aktiveAktionen();
+  const zeit = S.aktionen.length ? new Date(Math.max(...S.aktionen.map(x => new Date(x.abgerufen_am).getTime()))) : null;
   const q = S.akSuche.trim().toLowerCase();
-  const proLaden = l => alle.filter(x => x.laden === l);
-  let liste = proLaden(S.akLaden).filter(x => !q || (x.name + ' ' + (x.beschreibung || '')).toLowerCase().includes(q));
+  const amTag = aktiv.filter(x => giltAm(x, tag));
+  const proLaden = l => amTag.filter(x => x.laden === l);
+  // Noch keine Aktionen für den Einkaufstag veröffentlicht: aktuelle zeigen, mit Hinweis
+  const nochNicht = !proLaden(S.akLaden).length && aktiv.some(x => x.laden === S.akLaden);
+  const basis = nochNicht ? aktiv.filter(x => x.laden === S.akLaden) : proLaden(S.akLaden);
+  const zeitraum = (() => { const v = basis.map(x => x.gueltig_von).filter(Boolean).sort(), b = basis.map(x => x.gueltig_bis).filter(Boolean).sort();
+    return v.length && b.length ? `${datumKurz(v[v.length - 1] <= tag ? v[v.length - 1] : v[0])} – ${datumKurz(b[0] >= tag ? b[0] : b[b.length - 1])}` : ''; })();
+  let liste = basis.filter(x => !q || (x.name + ' ' + (x.beschreibung || '')).toLowerCase().includes(q));
   if (S.akFilter === 'meine') liste = liste.filter(x => passenderArtikel(x));
   if (S.akFilter === 'liste') liste = liste.filter(x => aktionPosition(x));
-  let html = `<div class="chips">${['Migros', 'Denner'].map(l => `<button class="chip" data-akl="${l}" aria-pressed="${S.akLaden === l}">${l} (${proLaden(l).length})</button>`).join('')}</div>
+  let html = `<div class="wochenkopf"><div class="wk-gross">Aktionen für den Einkauf am ${esc(datumLang(tag))}</div>
+      <div class="wk-klein">${esc(S.akLaden)}${zeitraum ? ` · gültig ${esc(zeitraum)}` : ''}</div></div>
+    ${nochNicht ? `<div class="hinweis warn">Die ${esc(S.akLaden)}-Aktionen für ${esc(datumLang(tag))} sind noch nicht veröffentlicht${S.akLaden === 'Migros' ? ' (meist ab Dienstag/Mittwoch)' : ' (meist ab Dienstag)'}. Angezeigt werden die aktuell gültigen Aktionen – bitte die Daten beachten.</div>` : ''}
+    <div class="chips">${['Migros', 'Denner'].map(l => `<button class="chip" data-akl="${l}" aria-pressed="${S.akLaden === l}">${l} (${proLaden(l).length || aktiv.filter(x => x.laden === l).length})</button>`).join('')}</div>
     <input class="search" id="akSuche" placeholder="In den Aktionen suchen …" value="${esc(S.akSuche)}" autocomplete="off">
     <div class="chips">${[['alle', 'Alle'], ['meine', 'Passt zu meinen Artikeln'], ['liste', 'Auf der Liste']].map(([k, t]) => `<button class="chip" data-akf="${k}" aria-pressed="${S.akFilter === k}">${t}</button>`).join('')}</div>
     <p class="sum">${zeit ? `Stand: ${zeit.toLocaleDateString('de-CH')} ${zeit.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })}. Wird Di und Mi automatisch aktualisiert.` : 'Noch keine Aktionen geladen.'}
@@ -712,10 +737,11 @@ function renderAktionen(main) {
   if (S.akFilter !== 'meine' && meine.length) html += block('Passt zu deinen Artikeln', meine);
   else if (S.akFilter === 'meine') html += block('Passt zu deinen Artikeln', meine);
   if (S.akFilter !== 'meine') {
-    const g = gruppiere(rest.sort((x, y) => coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)), x => x.kategorie || 'Weitere Aktionen');
+    const nonFood = k => /bekleidung|baby|kind|spiel|hobby|beauty|gesundheit|wohn|garten|elektron|sport|tier|blumen|freizeit|reise|multimedia|schuh|accessoires|sonstiges/i.test(k || '') ? 1 : 0;
+    const g = gruppiere(rest.sort((x, y) => (nonFood(x.kategorie) - nonFood(y.kategorie)) || coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)), x => x.kategorie || 'Weitere Aktionen');
     for (const [k, its] of g) html += block(k, its);
   }
-  html += `<p class="sum" style="margin-top:14px">Quellen: denner.ch und aktionis.ch. Region und Verfügbarkeit können abweichen.</p>`;
+  html += `<p class="sum" style="margin-top:14px">Quellen: Migros direkt von migros.ch (Region Aare), Denner von denner.ch und aktionis.ch. Verfügbarkeit im Laden kann abweichen.</p>`;
   main.innerHTML = html;
 
   main.querySelectorAll('[data-akl]').forEach(b => b.onclick = () => { S.akLaden = b.dataset.akl; render(); });
@@ -738,15 +764,14 @@ function aktionZeile(ak) {
   const a = passenderArtikel(ak), p = aktionPosition(ak);
   const menge = p ? (p.menge_fix || 1) : 0;
   const preis = `${chf(ak.preis)}${ak.preis_alt ? ` <span class="alt">statt ${chf(ak.preis_alt)}</span>` : ''}${ak.rabatt ? ` <span class="tag aktion">${esc(ak.rabatt)}</span>` : ''}`;
-  const bis = ak.gueltig_bis ? ` · bis ${new Date(ak.gueltig_bis + 'T12:00').toLocaleDateString('de-CH', { day: 'numeric', month: 'numeric' })}` : '';
+  const bis = ak.gueltig_bis ? ` · ${ak.gueltig_von ? datumKurz(ak.gueltig_von) + '–' : 'bis '}${datumKurz(ak.gueltig_bis)}` : '';
   return `<div class="row aktionrow${p ? ' auf' : ''}" data-ak="${ak.id}">
     <div class="main"><div class="name">${esc(ak.name)}</div>
       <div class="meta">${esc((ak.beschreibung || '').replace(/,?\s*Angebot gilt nur.*$/i, ''))}${bis}</div>
       <div class="preis">${preis}</div>
       ${a ? `<div class="meta">Dein Artikel: <b>${esc(a.name)}</b> · ${vorratText(a)}</div>` : ''}
     </div>
-    ${p ? `<div class="stepper"><button class="iconbtn" data-akd="-1" aria-label="Weniger">−</button><span>${menge}</span><button class="iconbtn" data-akd="1" aria-label="Mehr">+</button></div>`
-        : `<button class="btn small primary" data-akd="1">+ Liste</button>`}
+    <div class="stepper ak-stepper${p ? ' aktiv' : ''}" title="Anzahl auf der Einkaufsliste"><button class="iconbtn" data-akd="-1" aria-label="Weniger" ${p ? '' : 'disabled'}>−</button><span>${menge}</span><button class="iconbtn" data-akd="1" aria-label="Mehr">+</button></div>
   </div>`;
 }
 
@@ -762,10 +787,10 @@ async function aktionMenge(ak, d) {
       Object.assign(p, await S.api.positionAendern(p.id, { menge_fix: neu }));
     } else if (a) {
       const ap = posFor(a.id);
-      const werte = { aufnehmen: true, in_aktion: true, aktion_id: ak.id, menge_fix: Math.max(1, ap && ap.menge_fix || grund(a).menge || 1), laden: ak.laden === a.standardladen ? null : ak.laden };
+      const werte = { aufnehmen: true, in_aktion: true, aktion_id: ak.id, menge_fix: Math.max(1, (ap && ap.aufnehmen !== false && ap.menge_fix) || 1), laden: ak.laden === a.standardladen ? null : ak.laden };
       if (ap) Object.assign(ap, await S.api.positionAendern(ap.id, werte));
       else S.pos.push(await S.api.positionNeu(Object.assign({ einkauf_id: S.einkauf.id, artikel_id: a.id }, werte)));
-      toast(`«${a.name}» als Aktion auf der Liste.`);
+      toast(`«${a.name}» als Aktion auf der Liste (${werte.menge_fix}).`);
     } else {
       S.pos.push(await S.api.positionNeu({ einkauf_id: S.einkauf.id, freitext: ak.name, kategorie: ak.kategorie || 'Aktion', laden: ak.laden, in_aktion: true, aktion_id: ak.id, menge_fix: 1 }));
       toast(`«${ak.name}» auf der Liste.`);
