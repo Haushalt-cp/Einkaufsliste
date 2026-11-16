@@ -98,6 +98,13 @@
   .setup .btn { width: 100%; margin-top: 10px; }
   .loading { text-align: center; color: var(--muted); padding: 40px 0; }
   .sum { font-size: 13px; color: var(--muted); font-weight: 500; }
+  .tag.grau { background: #efede7; color: var(--muted); }
+  .chip.aktion { font-size: 13px; padding: 3px 10px; }
+  .chip.aktion[aria-pressed="true"] { background: #e2574c; border-color: #e2574c; color: #fff; }
+  .hinweis { border-radius: var(--radius); padding: 10px 12px; margin: 8px 0; font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .hinweis.warn { background: var(--warn-soft); color: #7a1a14; }
+  .hinweis.ok { background: var(--accent-soft); color: var(--accent); }
+  .menge { font-weight: 700; color: var(--accent); }
   .result { padding: 8px 12px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
   .result:first-child { border-top: 0; }
   .result .main { flex: 1; }
@@ -157,6 +164,7 @@ function restApi(key) {
     offenerEinkauf: () => call('GET', 'einkauf?select=*&abgeschlossen_am=is.null&order=id.desc&limit=1').then(r => r[0] || null),
     einkaufNeu: () => call('POST', 'einkauf', {}, 'return=representation').then(r => r[0]),
     einkaufAbschliessen: id => call('PATCH', 'einkauf?id=eq.' + id, { abgeschlossen_am: new Date().toISOString() }),
+    einkaufErledigt: (id, ja) => call('PATCH', 'einkauf?id=eq.' + id, { erledigt_am: ja ? new Date().toISOString() : null }, 'return=representation').then(r => r[0]),
     positionen: eid => call('GET', 'einkauf_position?select=*&einkauf_id=eq.' + eid + '&order=id.asc'),
     positionNeu: obj => call('POST', 'einkauf_position', obj, 'return=representation').then(r => r[0]),
     positionAendern: (id, obj) => call('PATCH', 'einkauf_position?id=eq.' + id, obj, 'return=representation').then(r => r[0]),
@@ -188,8 +196,9 @@ function demoApi() {
     offenerEinkauf: () => later(E.find(e => !e.abgeschlossen_am) || null),
     einkaufNeu: () => { const e = { id: ++nid, abgeschlossen_am: null }; E.push(e); return later(e); },
     einkaufAbschliessen: id => { E.find(e => e.id === id).abgeschlossen_am = new Date().toISOString(); return later(null); },
+    einkaufErledigt: (id, ja) => { const e = E.find(x => x.id === id); e.erledigt_am = ja ? new Date().toISOString() : null; return later(e); },
     positionen: eid => later(P.filter(p => p.einkauf_id === eid)),
-    positionNeu: o => { const p = Object.assign({ id: ++nid, artikel_id: null, freitext: null, kategorie: null, menge_anpassung: 0, menge_fix: null, laden: null, aufnehmen: null, gekauft: false, nicht_erhaeltlich: false }, o); P.push(p); return later(p); },
+    positionNeu: o => { const p = Object.assign({ id: ++nid, artikel_id: null, freitext: null, kategorie: null, menge_anpassung: 0, menge_fix: null, laden: null, aufnehmen: null, gekauft: false, nicht_erhaeltlich: false, in_aktion: false }, o); P.push(p); return later(p); },
     positionAendern: (id, o) => { const p = P.find(x => x.id === id); Object.assign(p, o); return later(p); },
     positionLoeschen: id => { P = P.filter(x => x.id !== id); return later(null); },
     fruehereZusatz: () => later(P.filter(p => p.freitext).map(p => ({ freitext: p.freitext, kategorie: p.kategorie, laden: p.laden }))),
@@ -223,8 +232,9 @@ function berechneListe() {
     let menge = p && p.menge_fix != null ? p.menge_fix : g.menge + ((p && p.menge_anpassung) || 0);
     const item = { a, p, laden, menge, grund: g.grund, faellig: g.menge > 0, kategorie: a.kategorie || OHNE_KAT, name: a.name };
     if (p && p.aufnehmen === false) { if (g.menge > 0 || a.nur_aktion) entfernt.push(item); continue; }
-    if (a.nur_aktion && !(p && p.aufnehmen === true)) { aktion.push(item); continue; }
-    if (p && p.aufnehmen === true) { item.grund = item.grund || (a.nur_aktion ? 'Aktion' : 'Zusätzlich'); if (menge < 1) item.menge = 1; liste.push(item); continue; }
+    const aufgenommen = p && (p.aufnehmen === true || (a.nur_aktion && p.in_aktion));
+    if (a.nur_aktion && !aufgenommen) { aktion.push(item); continue; }
+    if (aufgenommen) { item.grund = item.grund || (a.nur_aktion ? 'Aktion' : 'Zusätzlich'); if (item.menge < 1) item.menge = 1; liste.push(item); continue; }
     if (menge > 0) liste.push(item);
   }
   for (const p of S.pos.filter(p => !p.artikel_id)) {
@@ -255,6 +265,7 @@ async function setzeArtikel(a, aenderung) {
 function render() {
   const root = $('#root');
   const y = window.scrollY;
+  if (S.modus === 'einkauf') { renderEinkauf(root); window.scrollTo(0, y); return; }
   root.innerHTML = `
     <header>
       <div class="bar"><h1>Einkauf & Vorrat</h1>
@@ -289,7 +300,7 @@ function renderListe(main) {
   const sichtbar = liste.filter(i => S.laden === 'alle' || i.laden === S.laden);
   const offen = liste.filter(i => !(i.p && i.p.gekauft)).length;
 
-  let html = `<div class="chips" role="group" aria-label="Laden filtern">
+  let html = hinweise(liste) + `<div class="chips" role="group" aria-label="Laden filtern">
       <button class="chip" data-laden="alle" aria-pressed="${S.laden === 'alle'}">Alle (${liste.length})</button>
       ${ladenListe.map(l => `<button class="chip" data-laden="${esc(l)}" aria-pressed="${S.laden === l}">${esc(l)} (${liste.filter(i => i.laden === l).length})</button>`).join('')}
     </div>`;
@@ -319,8 +330,8 @@ function renderListe(main) {
       <details class="card" ${faellig ? 'open' : ''}><summary>${aktion.length} Artikel – diese Woche in Aktion? ${faellig ? `<span class="tag warn">${faellig} fällig</span>` : ''}</summary>
       <div class="rows">${sorted.map(i => `
         <div class="row"><div class="main"><div class="name">${esc(i.name)}</div>
-          <div class="meta">${ladenPill(i.laden)} ${i.faellig ? `<span class="tag warn">${esc(i.grund)}</span>` : ''}</div></div>
-          <button class="btn small" data-aufnehmen="${i.a.id}">+ Aufnehmen</button></div>`).join('')}</div></details>`;
+          <div class="meta">${ladenPill(i.laden)} ${vorratText(i.a)} ${i.faellig ? `<span class="tag warn">${esc(i.grund)}</span>` : ''}</div></div>
+          <button class="btn small" data-aufnehmen="${i.a.id}">In Aktion → aufnehmen</button></div>`).join('')}</div></details>`;
   }
   if (entfernt.length) {
     html += `<h2>Diese Woche entfernt</h2><details class="card"><summary>${entfernt.length} Artikel</summary><div class="rows">
@@ -330,6 +341,7 @@ function renderListe(main) {
 
   html += `<div class="footer-actions">
       <button class="btn" id="exportListe">Liste als Text kopieren</button>
+      <button class="btn" id="linkEinkauf">Link für einkaufende Person</button>
       <button class="btn primary" id="abschliessen" ${liste.length ? '' : 'disabled'}>Einkauf abschliessen</button>
     </div>
     <p class="sum" style="margin-top:8px">${offen} von ${liste.length} noch offen. «Einkauf abschliessen» bucht gekaufte Vorratsartikel in den Bestand und startet die nächste Liste.</p>
@@ -339,8 +351,10 @@ function renderListe(main) {
   main.querySelectorAll('[data-laden]').forEach(b => b.onclick = () => { S.laden = b.dataset.laden; render(); });
   main.querySelectorAll('[data-aufnehmen]').forEach(b => b.onclick = () => {
     const a = artById(+b.dataset.aufnehmen), g = grund(a), p = posFor(a.id);
-    setzePos({ a, p }, { aufnehmen: true, menge_fix: (p && p.menge_fix) || Math.max(1, g.menge) });
+    setzePos({ a, p }, { aufnehmen: true, in_aktion: true, menge_fix: (p && p.menge_fix) || Math.max(1, g.menge) });
   });
+  $('#linkEinkauf').onclick = einkaufLinkDialog;
+  const ab = $('#hAbschliessen'); if (ab) ab.onclick = abschliessenDialog;
   main.querySelectorAll('[data-zurueck]').forEach(b => b.onclick = () => {
     const a = artById(+b.dataset.zurueck); setzePos({ a, p: posFor(a.id) }, { aufnehmen: a.nur_aktion ? true : null });
   });
@@ -351,6 +365,85 @@ function renderListe(main) {
   verdrahteZeilen(main, liste);
 }
 
+function vorratText(a) {
+  if (!a) return '';
+  const b = isNum(a.bestand) ? fmt(a.bestand) : '?';
+  const unter = isNum(a.bestand) && isNum(a.mindestbestand) && a.bestand <= a.mindestbestand;
+  return `<span class="${unter ? 'tag warn' : 'tag grau'}">Vorrat ${b}${isNum(a.mindestbestand) ? ' / Min ' + fmt(a.mindestbestand) : ''}</span>`;
+}
+
+/* Hinweise oben auf der Liste (nur Admin-Ansicht) */
+function hinweise(liste) {
+  const unter = S.artikel.filter(a => isNum(a.bestand) && isNum(a.mindestbestand) && a.bestand <= a.mindestbestand)
+    .sort((x, y) => coll.compare(x.name, y.name));
+  const na = liste.filter(i => i.p && i.p.nicht_erhaeltlich);
+  let h = '';
+  if (S.einkauf && S.einkauf.erledigt_am) {
+    const d = new Date(S.einkauf.erledigt_am);
+    h += `<div class="hinweis ok"><b>Einkauf erledigt</b> gemeldet am ${d.toLocaleDateString('de-CH')} um ${d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })}.
+      <button class="btn small primary" id="hAbschliessen">Jetzt abschliessen</button></div>`;
+  }
+  if (na.length) h += `<div class="hinweis warn"><b>Nicht erhältlich gemeldet:</b> ${na.map(i => esc(i.name) + ' (' + esc(i.laden) + ')').join(', ')}. Bleibt auf der Liste, bis du es entfernst.</div>`;
+  if (unter.length) h += `<div class="hinweis warn"><b>Unter Mindestbestand (${unter.length}):</b> ${unter.map(a => `${esc(a.name)} <span class="sum">${fmt(a.bestand)}/${fmt(a.mindestbestand)}</span>`).join(', ')}</div>`;
+  return h;
+}
+
+function einkaufLinkDialog() {
+  const k = store.get(KEY_STORE) || '';
+  const link = location.origin + location.pathname + '#einkauf:' + k;
+  const ov = dialog(`<h2>Link für die einkaufende Person</h2>
+    <p class="sum">Dieser Link öffnet nur die Einkaufsliste (Gesamt, Migros, Denner) mit Abhaken und «Nicht erhältlich». Bitte nur an die einkaufende Person weitergeben.</p>
+    <div class="field"><textarea rows="3" readonly>${esc(link)}</textarea></div>
+    <div class="actions"><button class="btn" data-close>Schliessen</button><button class="btn primary" id="lKopie">Kopieren</button></div>`);
+  $('#lKopie', ov).onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Link kopiert.'); ov.remove(); } catch (e) { $('textarea', ov).select(); } };
+}
+
+/* ===== Ansicht für die einkaufende Person ===== */
+function renderEinkauf(root) {
+  const { liste } = berechneListe();
+  const reiter = [['alle', 'Gesamt'], ['Migros', 'Migros'], ['Denner', 'Denner']];
+  if (!reiter.some(r => r[0] === S.laden)) S.laden = 'alle';
+  const sichtbar = liste.filter(i => S.laden === 'alle' || i.laden === S.laden);
+  const offen = sichtbar.filter(i => !(i.p && i.p.gekauft)).length;
+  let html = `<header><div class="bar"><h1>Einkaufsliste</h1>
+      <button class="iconbtn" id="neuLaden" title="Neu laden" aria-label="Neu laden">↻</button></div>
+    <div class="tabs" role="tablist">${reiter.map(([k, t]) => `<button class="tab" role="tab" data-r="${k}" aria-selected="${S.laden === k}">${t} (${liste.filter(i => k === 'alle' || i.laden === k).length})</button>`).join('')}</div></header>
+    <main>`;
+  if (S.einkauf && S.einkauf.erledigt_am) html += `<div class="hinweis ok"><b>Als erledigt gemeldet.</b> Danke!</div>`;
+  if (!sichtbar.length) html += `<div class="card"><div class="empty">Keine Artikel auf dieser Liste.</div></div>`;
+  const g = gruppiere(sichtbar, i => i.laden);
+  for (const l of LAEDEN.concat([OHNE_LADEN])) {
+    const its = g.get(l); if (!its) continue;
+    html += `<h2>${ladenPill(l)} <span class="sum">${its.filter(i => !(i.p && i.p.gekauft)).length} offen</span></h2><div class="card">`;
+    for (const i of its.sort((x, y) => coll.compare(x.kategorie, y.kategorie) || coll.compare(x.name, y.name))) {
+      const p = i.p || {}, key = i.a ? 'a' + i.a.id : 'p' + p.id;
+      html += `<div class="row${p.gekauft ? ' done' : ''}${p.nicht_erhaeltlich ? ' na' : ''}" data-key="${key}">
+        <input type="checkbox" class="check" data-act="gekauft" ${p.gekauft ? 'checked' : ''} aria-label="Gekauft">
+        <div class="main"><div class="name"><span class="menge">${fmt(i.menge)}×</span> ${esc(i.name)}</div>
+          <div class="meta">${esc(i.kategorie)}${p.in_aktion ? ' · <span class="tag">Aktion</span>' : ''}</div></div>
+        <button class="btn small ${p.nicht_erhaeltlich ? 'danger' : ''}" data-act="na">${p.nicht_erhaeltlich ? 'Nicht erhältlich ✓' : 'Nicht erhältlich'}</button>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+  const erledigt = S.einkauf && S.einkauf.erledigt_am;
+  html += `<p class="sum" style="margin-top:14px">${offen} noch offen.</p>
+    <div class="footer-actions"><button class="btn ${erledigt ? '' : 'primary'}" id="erledigt">${erledigt ? 'Erledigt-Meldung zurücknehmen' : 'Einkauf erledigt'}</button></div></main>`;
+  root.innerHTML = html;
+  root.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { S.laden = b.dataset.r; render(); });
+  $('#neuLaden').onclick = () => laden();
+  const map = new Map(liste.map(i => [i.a ? 'a' + i.a.id : 'p' + i.p.id, i]));
+  root.querySelectorAll('.row[data-key]').forEach(row => {
+    const i = map.get(row.dataset.key); if (!i) return;
+    $('[data-act=gekauft]', row).onchange = e => setzePos(i, { gekauft: e.target.checked });
+    $('[data-act=na]', row).onclick = () => setzePos(i, { nicht_erhaeltlich: !(i.p && i.p.nicht_erhaeltlich) });
+  });
+  $('#erledigt').onclick = async () => {
+    try { S.einkauf = await S.api.einkaufErledigt(S.einkauf.id, !erledigt); } catch (e) { fehler(e); }
+    render(); if (!erledigt) toast('Einkauf als erledigt gemeldet.');
+  };
+}
+
 function listenZeile(i) {
   const p = i.p || {}, key = i.a ? 'a' + i.a.id : 'p' + p.id;
   const cls = (p.gekauft ? ' done' : '') + (p.nicht_erhaeltlich ? ' na' : '');
@@ -359,8 +452,9 @@ function listenZeile(i) {
     <input type="checkbox" class="check" data-act="gekauft" ${p.gekauft ? 'checked' : ''} aria-label="Gekauft">
     <div class="main">
       <div class="name">${esc(i.name)}</div>
-      <div class="meta">${esc(i.grund)}${i.a && i.a.nur_aktion ? ' · <span class="tag">Aktion</span>' : ''}${anders ? ' · <span class="tag">nur diese Woche</span>' : ''}${p.nicht_erhaeltlich ? ' · <span class="tag warn">nicht erhältlich</span>' : ''}</div>
-      <div style="margin-top:4px">${ladenSelect(i.laden)}</div>
+      <div class="meta">${esc(i.grund)}${i.a ? ' · ' + vorratText(i.a) : ''}${anders ? ' · <span class="tag">nur diese Woche</span>' : ''}${p.nicht_erhaeltlich ? ' · <span class="tag warn">nicht erhältlich</span>' : ''}</div>
+      <div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">${ladenSelect(i.laden)}
+        <button class="chip aktion" data-act="aktion" aria-pressed="${!!p.in_aktion}">${p.in_aktion ? 'In Aktion' : 'Aktion?'}</button></div>
     </div>
     <div class="stepper">
       <button class="iconbtn" data-act="minus" aria-label="Weniger">−</button><span>${fmt(i.menge)}</span>
@@ -381,6 +475,7 @@ function verdrahteZeilen(main, liste) {
       entfernen(i);
     };
     row.querySelector('select.laden').onchange = e => ladenGeaendert(i, e.target.value);
+    row.querySelector('[data-act=aktion]').onclick = () => setzePos(i, { in_aktion: !(i.p && i.p.in_aktion) });
     row.querySelector('[data-act=mehr]').onclick = () => zeilenMenue(i);
   });
 }
@@ -732,13 +827,21 @@ function einrichten(meldung) {
 }
 
 (function start() {
-  if (/[?&]demo\b/.test(location.search)) { S.api = demoApi(); return laden(); }
-  const ausLink = decodeURIComponent((location.hash || '').slice(1)).trim();
-  if (ausLink.startsWith('sb_publishable_')) {
-    store.set(KEY_STORE, ausLink);
-    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  const MODUS_STORE = 'einkauf-app-modus';
+  if (/[?&]demo\b/.test(location.search)) {
+    S.modus = /[?&]einkauf\b/.test(location.search) ? 'einkauf' : 'admin';
+    S.api = demoApi(); return laden();
   }
-  const k = ausLink.startsWith('sb_publishable_') ? ausLink : store.get(KEY_STORE);
+  // Admin-Link: #sb_publishable_…   Einkaufs-Link: #einkauf:sb_publishable_…
+  let ausLink = decodeURIComponent((location.hash || '').slice(1)).trim(), neuerModus = null;
+  if (ausLink.startsWith('einkauf:')) { ausLink = ausLink.slice(8); neuerModus = 'einkauf'; }
+  else if (ausLink.startsWith('sb_publishable_')) neuerModus = 'admin';
+  if (neuerModus && ausLink.startsWith('sb_publishable_')) {
+    store.set(KEY_STORE, ausLink); store.set(MODUS_STORE, neuerModus);
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  } else ausLink = '';
+  S.modus = store.get(MODUS_STORE) || 'admin';
+  const k = ausLink || store.get(KEY_STORE);
   if (!k) return einrichten();
   S.api = restApi(k); laden();
 })();
