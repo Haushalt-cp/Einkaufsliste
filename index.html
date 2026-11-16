@@ -774,7 +774,7 @@ function abschliessenDialog() {
 }
 
 /* ===== Aktionen ===== */
-const STOPP = new Set(['m', 'classic', 'budget', 'mbudget', 'mclassic', 'denner', 'migros', 'lidl', 'coop', 'bio', 'naturaplan', 'de', 'la', 'le', 'und', 'mit', 'ohne', 'per', 'pro', 'stk', 'stuck', 'stueck', 'g', 'kg', 'ml', 'l', 'cl', 'x', 'er', 'pack', 'big', 'alle']);
+const STOPP = new Set(['m', 'classic', 'budget', 'mbudget', 'mclassic', 'denner', 'migros', 'lidl', 'coop', 'bio', 'naturaplan', 'de', 'la', 'le', 'und', 'mit', 'ohne', 'per', 'pro', 'stk', 'stuck', 'stueck', 'g', 'kg', 'ml', 'l', 'cl', 'x', 'er', 'pack', 'big', 'alle', 'qualite', 'suisse', 'schweizer', 'schweiz', 'swiss', 'aus']);
 const stamm = w => w.length > 5 ? w.replace(/(en|er|e|n|s)$/, '') : w;
 const woerter = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').split(' ')
   .filter(w => w.length >= 3 && !STOPP.has(w) && !/^\d/.test(w)).map(stamm);
@@ -796,7 +796,10 @@ function passenderArtikel(ak) {
     if (!aw.length) continue;
     const treffer = aw.filter(x => w.has(x)).length;
     const score = treffer / aw.length + ((a.laeden || []).includes(ak.laden) ? 0.05 : 0);
-    if (treffer >= 1 && treffer === aw.length && score > bestScore) { best = a; bestScore = score; }
+    // Einwort-Artikel (z. B. «Honig») nur, wenn sie mindestens die Hälfte des Aktionsnamens ausmachen
+    // («IP-Suisse Joghurt Honig & Baumnuss» ist kein Honig)
+    if (aw.length < 2 && treffer / Math.max(1, w.size) < 0.5) continue;
+    if (treffer >= 1 && treffer === aw.length && score + treffer / Math.max(1, w.size) * 0.1 > bestScore) { best = a; bestScore = score + treffer / Math.max(1, w.size) * 0.1; }
   }
   ak._match = best;
   return best;
@@ -821,8 +824,18 @@ function aktionFuer(a) {
   return wochenAktionenAlle(0).find(ak => passenderArtikel(ak) === a) || null;
 }
 function oftGekauft(a) { const e = kaufrhythmus().get('a' + a.id); return !!(e && e.anzahl >= 2); }
+// Position zu einer Aktion. Die Aktions-Nummer ändert sich bei jedem Abruf, darum auch über Laden + Name
+// (Zusatzartikel) bzw. über den passenden Vorratsartikel finden.
 function aktionPosition(ak) {
-  return S.pos.find(p => p.aktion_id === ak.id) || null;
+  const direkt = S.pos.find(p => p.aktion_id === ak.id);
+  if (direkt) return direkt;
+  const veraltet = p => p.aktion_id && !S.aktionen.some(x => x.id === p.aktion_id);
+  const n = String(ak.name || '').trim().toLowerCase();
+  const frei = S.pos.find(p => !p.artikel_id && p.in_aktion && (p.freitext || '').trim().toLowerCase() === n && (!p.laden || p.laden === ak.laden));
+  if (frei) return frei;
+  const a = passenderArtikel(ak);
+  if (a) { const p = posFor(a.id); if (p && p.in_aktion && p.aufnehmen !== false && veraltet(p)) return p; }
+  return null;
 }
 const chf = n => isNum(n) ? n.toFixed(2) : (n ? String(n) : '');
 
@@ -1240,7 +1253,7 @@ async function laden() {
       try { S.aktionen = aktionenNormalisiert(await S.api.aktionen()); } catch (e) { S.aktionen = []; console.error(e); }
       try { S.verlauf = await S.api.verlauf(); } catch (e) { S.verlauf = []; console.error(e); }
     }
-    S.einkauf = einkaufAlt || await S.api.einkaufNeu();
+    S.einkauf = einkaufAlt || await S.api.einkaufNeu().catch(async () => await S.api.offenerEinkauf());
     S.pos = await S.api.positionen(S.einkauf.id);
     render();
   } catch (e) {
@@ -1292,7 +1305,7 @@ async function startMitSitzung(session) {
 }
 
 /* Menü oben rechts */
-const APP_VERSION = '2026-11-16c';
+const APP_VERSION = '2026-11-16d';
 function menue() {
   const admin = S.profil && S.profil.rolle === 'admin';
   const ov = dialog(`<h2>Menü</h2>
