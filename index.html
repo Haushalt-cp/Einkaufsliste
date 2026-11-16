@@ -123,6 +123,7 @@
   .zaehler.liste.aktiv .lzahl { color: #e8730c; }
   .zaehler.liste .iconbtn:disabled { opacity: .35; }
   .tag.aktion { background: #e2574c; color: #fff; }
+  details.card.untermin { border-color: #f0c9c5; background: #fff7f6; margin: 10px 0; }
   details.card.vorschlag { border-color: #b9d3be; background: #f4f9f4; margin-bottom: 10px; }
   .wochenkopf { background: var(--ink); color: #fff; border-radius: var(--radius); padding: 12px 14px; margin: 4px 0 10px; }
   .wk-gross { font-size: 19px; font-weight: 800; line-height: 1.25; }
@@ -891,6 +892,29 @@ function aktualisiereZeile(row, a) {
   const t = $('[data-unter]', row); if (t) t.hidden = grund(a).grund !== 'Nachkaufen' || a.routine;
 }
 
+// Artikel unter dem Mindestbestand (nur im Vorrat angezeigt)
+function unterMinListe() {
+  const liste = berechneListe().liste;
+  return S.artikel.filter(a => isNum(a.bestand) && isNum(a.mindestbestand) && a.bestand <= a.mindestbestand)
+    .sort((x, y) => coll.compare(x.name, y.name))
+    .map(a => ({ a, aufListe: liste.some(i => i.a === a), fehlt: a.mindestbestand - a.bestand + 1 }));
+}
+function unterMinBlock() {
+  const u = unterMinListe();
+  if (!u.length) return '';
+  const offen = u.filter(x => !x.aufListe).length;
+  return `<details class="card untermin" open><summary>Unter Mindestbestand <span class="tag warn">${u.length}</span></summary><div class="rows">
+    ${u.map(x => `<div class="row"><div class="main"><div class="name">${esc(x.a.name)}</div>
+      <div class="meta">${x.a.standardladen ? ladenPill(x.a.standardladen) + ' ' : ''}Vorrat ${fmt(x.a.bestand)} · Min ${fmt(x.a.mindestbestand)}</div></div>
+      ${x.aufListe ? '<span class="tag">auf der Einkaufsliste ✓</span>' : `<button class="btn small primary" data-unterplus="${x.a.id}">+ ${fmt(x.fehlt)} auf Einkaufsliste</button>`}</div>`).join('')}
+    ${offen > 1 ? `<div class="row"><span class="main"></span><button class="btn small" id="unterAlle">Alle ${offen} auf die Einkaufsliste</button></div>` : ''}
+  </div></details>`;
+}
+async function unterMinAufListe(artikel) {
+  for (const a of artikel) await setzePos({ a, p: posFor(a.id) }, { aufnehmen: true, menge_fix: Math.max(1, a.mindestbestand - a.bestand + 1) });
+  toast(artikel.length === 1 ? `«${artikel[0].name}» auf der Einkaufsliste.` : `${artikel.length} Artikel auf der Einkaufsliste.`);
+}
+
 // Anzahl auf der aktuellen Einkaufsliste (direkt aus dem Vorrat änderbar)
 function listenMenge(a, liste) { const i = (liste || berechneListe().liste).find(x => x.a === a); return i ? i.menge : 0; }
 function listenZaehler(a) {
@@ -925,6 +949,7 @@ function renderArtikel(main) {
   let html = `<input class="search" id="aSuche" placeholder="Artikel suchen …" value="${esc(S.suche)}" autocomplete="off">
     <p class="sum">${admin ? `Bestand${minZeigen ? ' und Minimum' : ''} mit − / + anpassen. Im orangen Feld setzt + den Artikel mit der gewünschten Anzahl auf die Einkaufsliste. Für alles andere auf den Namen tippen.
       <button class="btn small" id="minUmschalten" style="margin-left:6px">${minZeigen ? 'Minimum ausblenden' : 'Minimum einblenden'}</button>` : 'Bestand mit − / + anpassen, wenn etwas aufgebraucht oder dazugekommen ist. Das wird sofort gespeichert.'}</p>`;
+  if (admin && !q) html += unterMinBlock();
   if (!arts.length) html += `<div class="card"><div class="empty">Keine Artikel gefunden.</div></div>`;
   const g = gruppiere(arts.sort((x, y) => coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)), a => a.kategorie || OHNE_KAT);
   for (const [kat, as] of g) {
@@ -965,6 +990,8 @@ function renderArtikel(main) {
       };
     });
   });
+  main.querySelectorAll('[data-unterplus]').forEach(b => b.onclick = () => unterMinAufListe([artById(+b.dataset.unterplus)]));
+  const alle = $('#unterAlle'); if (alle) alle.onclick = () => unterMinAufListe(unterMinListe().filter(x => !x.aufListe).map(x => x.a));
   if (admin) { $('#neu').onclick = () => artikelDialog(null); $('#export').onclick = exportCsv; $('#minUmschalten').onclick = () => { store.set('einkauf-min-zeigen', minZeigen ? 'nein' : 'ja'); render(); }; }
 }
 
