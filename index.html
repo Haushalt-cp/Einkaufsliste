@@ -112,6 +112,10 @@
   .zaehler .zlbl { font-size: 12px; color: var(--muted); margin-right: 4px; }
   .zaehler .iconbtn { border: 1.5px solid var(--line); background: #fff; width: 32px; height: 32px; color: var(--ink); }
   .zaehler .num { width: 44px; padding: 5px 2px; }
+  .tag.aktion { background: #e2574c; color: #fff; }
+  .preis { font-weight: 700; margin-top: 2px; }
+  .preis .alt { font-weight: 400; color: var(--muted); font-size: 13px; text-decoration: line-through; }
+  .aktionrow.auf { background: #fff6f4; }
   .result { padding: 8px 12px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
   .result:first-child { border-top: 0; }
   .result .main { flex: 1; }
@@ -186,6 +190,13 @@ function restApi(tokenHolen) {
     benutzer: () => call('GET', 'benutzer?select=*&order=erstellt_am.asc'),
     benutzerRolle: (id, rolle) => call('PATCH', 'benutzer?id=eq.' + id, { rolle }, 'return=representation').then(r => r[0]),
     benutzerLoeschen: id => call('DELETE', 'benutzer?id=eq.' + id),
+    aktionen: () => call('GET', 'aktion_aktuell?select=*&order=laden.asc,name.asc'),
+    aktionenAktualisieren: async () => {
+      const token = await tokenHolen();
+      const res = await fetch(SUPABASE_URL + '/functions/v1/aktionen-holen', { method: 'POST', headers: { Authorization: 'Bearer ' + token, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' }, body: '{}' });
+      if (!res.ok) throw new Error('Abruf fehlgeschlagen (' + res.status + ')');
+      return res.json();
+    },
   };
 }
 
@@ -213,7 +224,7 @@ function demoApi() {
     einkaufAbschliessen: id => { E.find(e => e.id === id).abgeschlossen_am = new Date().toISOString(); return later(null); },
     einkaufErledigt: (id, ja) => { const e = E.find(x => x.id === id); e.erledigt_am = ja ? new Date().toISOString() : null; return later(e); },
     positionen: eid => later(P.filter(p => p.einkauf_id === eid)),
-    positionNeu: o => { const p = Object.assign({ id: ++nid, artikel_id: null, freitext: null, kategorie: null, menge_anpassung: 0, menge_fix: null, laden: null, aufnehmen: null, gekauft: false, nicht_erhaeltlich: false, in_aktion: false, menge_gekauft: null }, o); P.push(p); return later(p); },
+    positionNeu: o => { const p = Object.assign({ id: ++nid, artikel_id: null, freitext: null, kategorie: null, menge_anpassung: 0, menge_fix: null, laden: null, aufnehmen: null, gekauft: false, nicht_erhaeltlich: false, in_aktion: false, menge_gekauft: null, aktion_id: null }, o); P.push(p); return later(p); },
     positionAendern: (id, o) => { const p = P.find(x => x.id === id); Object.assign(p, o); return later(p); },
     positionLoeschen: id => { P = P.filter(x => x.id !== id); return later(null); },
     fruehereZusatz: () => later(P.filter(p => p.freitext).map(p => ({ freitext: p.freitext, kategorie: p.kategorie, laden: p.laden }))),
@@ -221,13 +232,20 @@ function demoApi() {
     benutzer: () => later([{ id: 'demo', email: 'demo@example.ch', rolle: 'admin' }, { id: 'u2', email: 'einkauf@example.ch', rolle: 'wartend' }]),
     benutzerRolle: (id, rolle) => later({ id, rolle }),
     benutzerLoeschen: () => later(null),
+    aktionen: () => later([
+      { id: 501, laden: 'Denner', name: 'Barilla Spaghetti n. 5', beschreibung: '500 g', preis: 1.95, preis_alt: 2.95, rabatt: '33%', kategorie: 'Vorräte', gueltig_von: '2026-11-19', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
+      { id: 502, laden: 'Denner', name: 'Broccoli', beschreibung: 'Spanien, per kg', preis: 2.5, preis_alt: 4, rabatt: '37%', kategorie: 'Früchte und Gemüse', gueltig_von: '2026-11-19', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
+      { id: 503, laden: 'Migros', name: 'M-Classic gehackte Tomaten, 3 x 280 g', beschreibung: 'Angebot gilt nur vom 18.11. bis 24.11.2026', preis: 2.4, preis_alt: 3.6, rabatt: '33%', kategorie: null, gueltig_von: '2026-11-18', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
+      { id: 504, laden: 'Migros', name: 'Blumenkohl', beschreibung: 'Schweiz, per Stück', preis: 2.95, preis_alt: 4.2, rabatt: '30%', kategorie: null, gueltig_von: '2026-11-18', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
+    ]),
+    aktionenAktualisieren: () => later({ ergebnis: [] }),
   };
 }
 
 /* ---------- Zustand ---------- */
 const S = {
   api: null, artikel: [], einkauf: null, pos: [], frueher: [],
-  tab: 'liste', suche: '', filter: 'alle', laden: 'alle', ekLaden: 'alle',
+  tab: 'liste', suche: '', filter: 'alle', laden: 'alle', ekLaden: 'alle', aktionen: [], akLaden: 'Denner', akSuche: '', akFilter: 'alle',
 };
 const posFor = id => S.pos.find(p => p.artikel_id === id);
 const artById = id => S.artikel.find(a => a.id === id);
@@ -256,7 +274,7 @@ function berechneListe() {
     if (menge > 0) liste.push(item);
   }
   for (const p of S.pos.filter(p => !p.artikel_id)) {
-    liste.push({ a: null, p, laden: p.laden || OHNE_LADEN, menge: p.menge_fix || 1, grund: 'Zusätzlich', kategorie: p.kategorie || OHNE_KAT, name: p.freitext });
+    liste.push({ a: null, p, laden: p.laden || OHNE_LADEN, menge: p.menge_fix || 1, grund: p.in_aktion ? 'Aktion' : 'Zusätzlich', kategorie: p.kategorie || OHNE_KAT, name: p.freitext });
   }
   return { liste, aktion, entfernt };
 }
@@ -284,7 +302,7 @@ function render() {
   const root = $('#root');
   const y = window.scrollY;
   const admin = S.modus !== 'einkauf';
-  const tabs = admin ? [['liste', 'Liste planen'], ['einkaufen', 'Einkaufen'], ['artikel', 'Vorrat']] : [['einkaufen', 'Einkaufen'], ['artikel', 'Vorrat']];
+  const tabs = admin ? [['liste', 'Planen'], ['aktionen', 'Aktionen'], ['einkaufen', 'Einkaufen'], ['artikel', 'Vorrat']] : [['einkaufen', 'Einkaufen'], ['artikel', 'Vorrat']];
   if (!tabs.some(t => t[0] === S.tab)) S.tab = admin ? 'liste' : 'einkaufen';
   root.innerHTML = `
     <header>
@@ -300,6 +318,7 @@ function render() {
   const main = $('#main');
   if (S.tab === 'einkaufen') renderEinkaufen(main);
   else if (S.tab === 'liste') renderListe(main);
+  else if (S.tab === 'aktionen') renderAktionen(main);
   else renderArtikel(main);
   window.scrollTo(0, y);
 }
@@ -352,7 +371,7 @@ function renderListe(main) {
       <details class="card" ${faellig ? 'open' : ''}><summary>${aktion.length} Artikel – diese Woche in Aktion? ${faellig ? `<span class="tag warn">${faellig} fällig</span>` : ''}</summary>
       <div class="rows">${sorted.map(i => `
         <div class="row"><div class="main"><div class="name">${esc(i.name)}</div>
-          <div class="meta">${ladenPill(i.laden)} ${vorratText(i.a)} ${i.faellig ? `<span class="tag warn">${esc(i.grund)}</span>` : ''}</div></div>
+          <div class="meta">${ladenPill(i.laden)} ${vorratText(i.a)} ${i.faellig ? `<span class="tag warn">${esc(i.grund)}</span>` : ''}${aktionFuer(i.a) ? ` <span class="tag aktion">Aktion ${esc(aktionFuer(i.a).laden)} ${esc(aktionFuer(i.a).rabatt || '')}</span>` : ''}</div></div>
           <button class="btn small" data-aufnehmen="${i.a.id}">In Aktion → aufnehmen</button></div>`).join('')}</div></details>`;
   }
   if (entfernt.length) {
@@ -637,6 +656,124 @@ function abschliessenDialog() {
   };
 }
 
+/* ===== Aktionen ===== */
+const STOPP = new Set(['m', 'classic', 'budget', 'mbudget', 'mclassic', 'denner', 'migros', 'lidl', 'coop', 'bio', 'naturaplan', 'de', 'la', 'le', 'und', 'mit', 'ohne', 'per', 'pro', 'stk', 'stuck', 'stueck', 'g', 'kg', 'ml', 'l', 'cl', 'x', 'er', 'pack', 'big', 'alle']);
+const stamm = w => w.length > 5 ? w.replace(/(en|er|e|n|s)$/, '') : w;
+const woerter = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').split(' ')
+  .filter(w => w.length >= 3 && !STOPP.has(w) && !/^\d/.test(w)).map(stamm);
+const heuteIso = () => new Date().toISOString().slice(0, 10);
+function aktiveAktionen() { const h = heuteIso(); return S.aktionen.filter(x => !x.gueltig_bis || x.gueltig_bis >= h); }
+// Passender Vorratsartikel zu einer Aktion (Wortvergleich, alle Wörter des Artikels müssen vorkommen)
+function passenderArtikel(ak) {
+  if (ak._match !== undefined) return ak._match;
+  const w = new Set(woerter(ak.name));
+  let best = null, bestScore = 0;
+  for (const a of S.artikel) {
+    const aw = woerter(a.name);
+    if (!aw.length) continue;
+    const treffer = aw.filter(x => w.has(x)).length;
+    const score = treffer / aw.length + ((a.laeden || []).includes(ak.laden) ? 0.05 : 0);
+    if (treffer >= 1 && treffer === aw.length && score > bestScore) { best = a; bestScore = score; }
+  }
+  ak._match = best;
+  return best;
+}
+function aktionFuer(a) {
+  if (!a) return null;
+  return aktiveAktionen().find(ak => passenderArtikel(ak) === a) || null;
+}
+function aktionPosition(ak) {
+  return S.pos.find(p => p.aktion_id === ak.id) || null;
+}
+const chf = n => isNum(n) ? n.toFixed(2) : (n ? String(n) : '');
+
+function renderAktionen(main) {
+  const alle = aktiveAktionen();
+  const zeit = alle.length ? new Date(Math.max(...alle.map(x => new Date(x.abgerufen_am).getTime()))) : null;
+  const q = S.akSuche.trim().toLowerCase();
+  const proLaden = l => alle.filter(x => x.laden === l);
+  let liste = proLaden(S.akLaden).filter(x => !q || (x.name + ' ' + (x.beschreibung || '')).toLowerCase().includes(q));
+  if (S.akFilter === 'meine') liste = liste.filter(x => passenderArtikel(x));
+  if (S.akFilter === 'liste') liste = liste.filter(x => aktionPosition(x));
+  let html = `<div class="chips">${['Migros', 'Denner'].map(l => `<button class="chip" data-akl="${l}" aria-pressed="${S.akLaden === l}">${l} (${proLaden(l).length})</button>`).join('')}</div>
+    <input class="search" id="akSuche" placeholder="In den Aktionen suchen …" value="${esc(S.akSuche)}" autocomplete="off">
+    <div class="chips">${[['alle', 'Alle'], ['meine', 'Passt zu meinen Artikeln'], ['liste', 'Auf der Liste']].map(([k, t]) => `<button class="chip" data-akf="${k}" aria-pressed="${S.akFilter === k}">${t}</button>`).join('')}</div>
+    <p class="sum">${zeit ? `Stand: ${zeit.toLocaleDateString('de-CH')} ${zeit.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })}. Wird Di und Mi automatisch aktualisiert.` : 'Noch keine Aktionen geladen.'}
+      <button class="btn small" id="akNeu" style="margin-left:6px">Jetzt aktualisieren</button></p>`;
+  if (!liste.length) html += `<div class="card"><div class="empty">Keine Aktionen gefunden.</div></div>`;
+  // Passende zuerst, dann nach Kategorie
+  const meine = liste.filter(x => passenderArtikel(x)), rest = liste.filter(x => !passenderArtikel(x));
+  const block = (titel, items) => {
+    if (!items.length) return '';
+    let h = `<h2>${esc(titel)} <span class="sum">${items.length}</span></h2><div class="card">`;
+    for (const ak of items) h += aktionZeile(ak);
+    return h + '</div>';
+  };
+  if (S.akFilter !== 'meine' && meine.length) html += block('Passt zu deinen Artikeln', meine);
+  else if (S.akFilter === 'meine') html += block('Passt zu deinen Artikeln', meine);
+  if (S.akFilter !== 'meine') {
+    const g = gruppiere(rest.sort((x, y) => coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)), x => x.kategorie || 'Weitere Aktionen');
+    for (const [k, its] of g) html += block(k, its);
+  }
+  html += `<p class="sum" style="margin-top:14px">Quellen: denner.ch und aktionis.ch. Region und Verfügbarkeit können abweichen.</p>`;
+  main.innerHTML = html;
+
+  main.querySelectorAll('[data-akl]').forEach(b => b.onclick = () => { S.akLaden = b.dataset.akl; render(); });
+  main.querySelectorAll('[data-akf]').forEach(b => b.onclick = () => { S.akFilter = b.dataset.akf; render(); });
+  const s = $('#akSuche');
+  s.oninput = () => { S.akSuche = s.value; const pos = s.selectionStart; render(); const n = $('#akSuche'); n.focus(); n.setSelectionRange(pos, pos); };
+  $('#akNeu').onclick = async () => {
+    const b = $('#akNeu'); b.disabled = true; b.textContent = 'Lädt … (ca. 30 s)';
+    try { await S.api.aktionenAktualisieren(); S.aktionen = await S.api.aktionen(); toast('Aktionen aktualisiert.'); }
+    catch (e) { fehler(e); }
+    render();
+  };
+  main.querySelectorAll('.row[data-ak]').forEach(row => {
+    const ak = S.aktionen.find(x => x.id === +row.dataset.ak);
+    row.querySelectorAll('[data-akd]').forEach(b => b.onclick = () => aktionMenge(ak, Number(b.dataset.akd)));
+  });
+}
+
+function aktionZeile(ak) {
+  const a = passenderArtikel(ak), p = aktionPosition(ak);
+  const menge = p ? (p.menge_fix || 1) : 0;
+  const preis = `${chf(ak.preis)}${ak.preis_alt ? ` <span class="alt">statt ${chf(ak.preis_alt)}</span>` : ''}${ak.rabatt ? ` <span class="tag aktion">${esc(ak.rabatt)}</span>` : ''}`;
+  const bis = ak.gueltig_bis ? ` · bis ${new Date(ak.gueltig_bis + 'T12:00').toLocaleDateString('de-CH', { day: 'numeric', month: 'numeric' })}` : '';
+  return `<div class="row aktionrow${p ? ' auf' : ''}" data-ak="${ak.id}">
+    <div class="main"><div class="name">${esc(ak.name)}</div>
+      <div class="meta">${esc((ak.beschreibung || '').replace(/,?\s*Angebot gilt nur.*$/i, ''))}${bis}</div>
+      <div class="preis">${preis}</div>
+      ${a ? `<div class="meta">Dein Artikel: <b>${esc(a.name)}</b> · ${vorratText(a)}</div>` : ''}
+    </div>
+    ${p ? `<div class="stepper"><button class="iconbtn" data-akd="-1" aria-label="Weniger">−</button><span>${menge}</span><button class="iconbtn" data-akd="1" aria-label="Mehr">+</button></div>`
+        : `<button class="btn small primary" data-akd="1">+ Liste</button>`}
+  </div>`;
+}
+
+async function aktionMenge(ak, d) {
+  const a = passenderArtikel(ak), p = aktionPosition(ak);
+  const alt = p ? (p.menge_fix || 1) : 0, neu = Math.max(0, alt + d);
+  try {
+    if (neu === 0 && p) {
+      if (p.artikel_id) { Object.assign(p, await S.api.positionAendern(p.id, { aufnehmen: null, in_aktion: false, aktion_id: null, menge_fix: null, laden: null })); }
+      else { await S.api.positionLoeschen(p.id); S.pos = S.pos.filter(x => x !== p); }
+      toast(`«${ak.name}» von der Liste genommen.`);
+    } else if (p) {
+      Object.assign(p, await S.api.positionAendern(p.id, { menge_fix: neu }));
+    } else if (a) {
+      const ap = posFor(a.id);
+      const werte = { aufnehmen: true, in_aktion: true, aktion_id: ak.id, menge_fix: Math.max(1, ap && ap.menge_fix || grund(a).menge || 1), laden: ak.laden === a.standardladen ? null : ak.laden };
+      if (ap) Object.assign(ap, await S.api.positionAendern(ap.id, werte));
+      else S.pos.push(await S.api.positionNeu(Object.assign({ einkauf_id: S.einkauf.id, artikel_id: a.id }, werte)));
+      toast(`«${a.name}» als Aktion auf der Liste.`);
+    } else {
+      S.pos.push(await S.api.positionNeu({ einkauf_id: S.einkauf.id, freitext: ak.name, kategorie: ak.kategorie || 'Aktion', laden: ak.laden, in_aktion: true, aktion_id: ak.id, menge_fix: 1 }));
+      toast(`«${ak.name}» auf der Liste.`);
+    }
+  } catch (e) { fehler(e); }
+  render();
+}
+
 /* ===== Vorrat & Artikel ===== */
 const FILTER = [
   ['alle', 'Alle'], ['routine', 'Routine'], ['aktion', 'Nur Aktion'], ['ohneBestand', 'Bestand fehlt'],
@@ -678,9 +815,11 @@ function renderArtikel(main) {
   const filter = admin ? FILTER : FILTER.filter(f => ['alle', 'unterMin', 'ohneBestand'].includes(f[0]));
   if (!filter.some(f => f[0] === S.filter)) S.filter = 'alle';
   const arts = S.artikel.filter(a => (!q || a.name.toLowerCase().includes(q)) && filterFn(S.filter)(a));
+  const minZeigen = admin && store.get('einkauf-min-zeigen') !== 'nein';
   let html = `<input class="search" id="aSuche" placeholder="Artikel suchen …" value="${esc(S.suche)}" autocomplete="off">
     <div class="chips">${filter.map(([k, t]) => `<button class="chip" data-f="${k}" aria-pressed="${S.filter === k}">${t} (${S.artikel.filter(filterFn(k)).length})</button>`).join('')}</div>
-    <p class="sum">${admin ? 'Bestand und Minimum mit − / + anpassen oder eintippen, das wird sofort gespeichert. Für alles andere auf den Namen tippen.' : 'Bestand mit − / + anpassen, wenn etwas aufgebraucht oder dazugekommen ist. Das wird sofort gespeichert.'}</p>`;
+    <p class="sum">${admin ? `Bestand${minZeigen ? ' und Minimum' : ''} mit − / + anpassen oder eintippen, das wird sofort gespeichert. Für alles andere auf den Namen tippen.
+      <button class="btn small" id="minUmschalten" style="margin-left:6px">${minZeigen ? 'Minimum ausblenden' : 'Minimum einblenden'}</button>` : 'Bestand mit − / + anpassen, wenn etwas aufgebraucht oder dazugekommen ist. Das wird sofort gespeichert.'}</p>`;
   if (!arts.length) html += `<div class="card"><div class="empty">Keine Artikel gefunden.</div></div>`;
   const g = gruppiere(arts.sort((x, y) => coll.compare(x.kategorie || 'zzz', y.kategorie || 'zzz') || coll.compare(x.name, y.name)), a => a.kategorie || OHNE_KAT);
   for (const [kat, as] of g) {
@@ -691,8 +830,8 @@ function renderArtikel(main) {
         <div class="main">${admin ? '<button class="linkish" data-edit>' : '<div>'}<div class="name">${esc(a.name)}</div>
           <div class="meta">${a.standardladen ? ladenPill(a.standardladen) : '<span class="tag warn">kein Standardladen</span>'}
           ${a.routine ? ` <span class="tag">Routine ${fmt(a.routine_menge)}/Wo</span>` : ''}${a.nur_aktion ? ' <span class="tag">nur Aktion</span>' : ''}
-          <span class="tag warn" data-unter ${unter ? '' : 'hidden'}>unter Minimum</span>${!admin ? ` <span class="tag grau">Min ${fmt(a.mindestbestand)}</span>` : ''}</div>${admin ? '</button>' : '</div>'}</div>
-        <div class="zaehlerzeile">${zaehler(a, 'bestand', 'Bestand')}${admin ? zaehler(a, 'mindestbestand', 'Min') : ''}</div>
+          <span class="tag warn" data-unter ${unter ? '' : 'hidden'}>unter Minimum</span>${!minZeigen ? ` <span class="tag grau">Min ${fmt(a.mindestbestand)}</span>` : ''}</div>${admin ? '</button>' : '</div>'}</div>
+        <div class="zaehlerzeile">${zaehler(a, 'bestand', 'Bestand')}${minZeigen ? zaehler(a, 'mindestbestand', 'Min') : ''}</div>
       </div>`;
     }
     html += `</div>`;
@@ -720,7 +859,7 @@ function renderArtikel(main) {
       };
     });
   });
-  if (admin) { $('#neu').onclick = () => artikelDialog(null); $('#export').onclick = exportCsv; }
+  if (admin) { $('#neu').onclick = () => artikelDialog(null); $('#export').onclick = exportCsv; $('#minUmschalten').onclick = () => { store.set('einkauf-min-zeigen', minZeigen ? 'nein' : 'ja'); render(); }; }
 }
 
 /* Artikel anlegen / bearbeiten – alle Felder, damit die Tabelle vollständig bleibt */
@@ -849,6 +988,7 @@ async function laden() {
   try {
     const [artikel, einkaufAlt, frueher] = await Promise.all([S.api.artikel(), S.api.offenerEinkauf(), S.api.fruehereZusatz()]);
     S.artikel = artikel; S.frueher = frueher || [];
+    if (S.modus !== 'einkauf') { try { S.aktionen = await S.api.aktionen(); } catch (e) { S.aktionen = []; console.error(e); } }
     S.einkauf = einkaufAlt || await S.api.einkaufNeu();
     S.pos = await S.api.positionen(S.einkauf.id);
     render();
