@@ -390,8 +390,6 @@ function vorratText(a) {
 
 /* Hinweise oben auf der Liste (nur Admin-Ansicht) */
 function hinweise(liste) {
-  const unter = S.artikel.filter(a => isNum(a.bestand) && isNum(a.mindestbestand) && a.bestand <= a.mindestbestand)
-    .sort((x, y) => coll.compare(x.name, y.name));
   const na = liste.filter(i => i.p && i.p.nicht_erhaeltlich);
   let h = '';
   if (S.einkauf && S.einkauf.erledigt_am) {
@@ -400,7 +398,6 @@ function hinweise(liste) {
       <button class="btn small primary" id="hAbschliessen">Jetzt abschliessen</button></div>`;
   }
   if (na.length) h += `<div class="hinweis warn"><b>Nicht erhältlich gemeldet:</b> ${na.map(i => esc(i.name) + ' (' + esc(i.laden) + ')').join(', ')}. Bleibt auf der Liste, bis du es entfernst.</div>`;
-  if (unter.length) h += `<div class="hinweis warn"><b>Unter Mindestbestand (${unter.length}):</b> ${unter.map(a => `${esc(a.name)} <span class="sum">${fmt(a.bestand)}/${fmt(a.mindestbestand)}</span>`).join(', ')}</div>`;
   return h;
 }
 
