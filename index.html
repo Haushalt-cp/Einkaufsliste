@@ -254,8 +254,9 @@ function demoApi() {
     { id: 4, name: 'Tomatenpüree', laeden: ['Denner', 'Migros'], standardladen: 'Migros', nur_aktion: false, routine: false, routine_menge: null, bestand: 0, mindestbestand: 1, kategorie: 'Konserven & Saucen', bemerkung: null, aktiv: true },
     { id: 5, name: 'Bulgur', laeden: ['Denner', 'Türkengeschäft'], standardladen: 'Türkengeschäft', nur_aktion: false, routine: false, routine_menge: null, bestand: 3, mindestbestand: 1, kategorie: 'Teigwaren, Reis & Hülsenfrüchte', bemerkung: null, aktiv: true },
     { id: 6, name: 'Kohlrabi', laeden: ['Denner', 'Migros'], standardladen: null, nur_aktion: false, routine: true, routine_menge: 3, bestand: null, mindestbestand: null, kategorie: 'Brot & Frischware', bemerkung: null, aktiv: true },
-    { id: 7, name: 'Blumenkohl', laeden: ['Denner', 'Migros'], standardladen: 'Migros', nur_aktion: true, routine: false, routine_menge: null, bestand: null, mindestbestand: null, kategorie: null, bemerkung: null, aktiv: true, im_vorrat: false },
-    { id: 8, name: 'Bananen', laeden: ['Migros', 'Denner'], standardladen: 'Migros', nur_aktion: false, routine: false, routine_menge: null, bestand: null, mindestbestand: null, kategorie: 'Früchte und Gemüse', bemerkung: null, aktiv: true, im_vorrat: false },
+    { id: 7, name: 'Blumenkohl', laeden: ['Denner', 'Migros'], standardladen: 'Migros', nur_aktion: true, routine: false, routine_menge: null, bestand: null, mindestbestand: null, kategorie: null, bemerkung: null, aktiv: true, liste: 'haeufig' },
+    { id: 8, name: 'Bananen', laeden: ['Migros', 'Denner'], standardladen: 'Migros', nur_aktion: false, routine: false, routine_menge: null, bestand: null, mindestbestand: null, kategorie: 'Früchte und Gemüse', bemerkung: null, aktiv: true, liste: 'haeufig' },
+    { id: 9, name: 'Safran', laeden: ['Migros'], standardladen: 'Migros', nur_aktion: false, routine: false, routine_menge: null, bestand: null, mindestbestand: null, kategorie: 'Sonstiges', bemerkung: null, aktiv: true, liste: 'sonstige' },
   ];
   let E = []; let P = [];
   const d = x => JSON.parse(JSON.stringify(x));
@@ -346,8 +347,12 @@ const katAuswahl = (id, wert) => { const w = wert ? dennerKategorie(wert) : ''; 
 const aktionenNormalisiert = liste => liste.map(x => ({ ...x, kategorie: dennerKategorie(x.kategorie, x.name) }));
 
 /* ---------- Einkaufslogik ---------- */
-// Artikel mit im_vorrat = false sind «häufig gekauft»: nur über die Suche, ohne Bestand
-const imVorrat = a => !!a && a.im_vorrat !== false;
+// Drei Listen: Vorrat (mit Bestand), Häufig gekauft und Sonstige (beide ohne Bestand, nur über die Suche)
+const LISTEN = [['vorrat', 'Vorrat'], ['haeufig', 'Häufig gekauft'], ['sonstige', 'Sonstige']];
+const LISTEN_TEXT = { vorrat: 'im Vorrat', haeufig: 'häufig gekauft', sonstige: 'sonstige' };
+const listeVon = a => (a && a.liste) || (a && a.im_vorrat === false ? 'haeufig' : 'vorrat');
+const imVorrat = a => !!a && listeVon(a) === 'vorrat';
+const listeSetzen = l => ({ liste: l, im_vorrat: l === 'vorrat' });   // alte Spalte im_vorrat bleibt stimmig
 // Grundmenge ohne Wochenanpassung
 function grund(a) {
   if (a.routine) return { menge: a.routine_menge || 0, grund: 'Routine' };
@@ -674,7 +679,7 @@ function zeilenMenue(i) {
   $('#mNA', ov).onclick = () => { setzePos(i, { nicht_erhaeltlich: !p.nicht_erhaeltlich }); ov.remove(); };
   $('#mWeg', ov).onclick = () => { ov.remove(); entfernen(i); };
   if (i.a) $('#mBearb', ov).onclick = () => { ov.remove(); artikelDialog(i.a); };
-  if (!i.a) $('#mAlsArtikel', ov).onclick = () => { ov.remove(); artikelDialog(null, { name: i.name, kategorie: i.p.kategorie, standardladen: i.p.laden, im_vorrat: false }, i.p); };
+  if (!i.a) $('#mAlsArtikel', ov).onclick = () => { ov.remove(); artikelDialog(null, { name: i.name, kategorie: i.p.kategorie, standardladen: i.p.laden, liste: 'sonstige' }, i.p); };
 }
 
 function textListe(items) {
@@ -709,10 +714,10 @@ function hinzufuegenDialog(start = '') {
     const q = inp.value.trim().toLowerCase();
     const aufListe = new Set(berechneListe().liste.filter(i => i.a).map(i => i.a.id));
     const m = suchMuster(q);
-    const treffer = S.artikel.filter(a => !q || passtSuche(a.name + ' ' + (a.kategorie || ''), m)).sort((x, y) => coll.compare(x.name, y.name)).slice(0, q ? 30 : 0);
+    const treffer = S.artikel.filter(a => !q || passtSuche(a.name + ' ' + (a.kategorie || ''), m)).sort((x, y) => ((listeVon(x) === 'sonstige') - (listeVon(y) === 'sonstige')) || coll.compare(x.name, y.name)).slice(0, q ? 30 : 0);
     const zus = frueher.filter(f => (!q || passtSuche(f.freitext + ' ' + (f.kategorie || ''), m)) && !S.pos.some(p => !p.artikel_id && p.freitext.toLowerCase() === f.freitext.toLowerCase()));
     let h = '';
-    for (const a of treffer) h += `<div class="result"><div class="main"><div class="name">${esc(a.name)}</div><div class="meta">${a.standardladen ? ladenPill(a.standardladen) : ''} ${esc(a.kategorie || '')}${imVorrat(a) ? ' · ' + vorratText(a) : ' · <span class="tag grau">häufig gekauft</span>'}</div></div>
+    for (const a of treffer) h += `<div class="result"><div class="main"><div class="name">${esc(a.name)}</div><div class="meta">${a.standardladen ? ladenPill(a.standardladen) : ''} ${esc(a.kategorie || '')}${imVorrat(a) ? ' · ' + vorratText(a) : ` · <span class="tag grau">${LISTEN_TEXT[listeVon(a)]}</span>`}</div></div>
       ${aufListe.has(a.id) ? '<span class="tag">auf Liste</span>' : `<button class="btn small" data-art="${a.id}">+</button>`}</div>`;
     if (!q && zus.length) {
       h += `<div class="result"><h3 style="margin:0">Früher hinzugefügt</h3></div>`;
@@ -736,7 +741,7 @@ function hinzufuegenDialog(start = '') {
       zusatzDialog(f.freitext, f.kategorie, f.laden, zeige);
     });
     const e1 = $('[data-einmal]', erg); if (e1) e1.onclick = () => zusatzDialog(inp.value.trim(), null, null, () => { inp.value = ''; zeige(); });
-    const e2 = $('[data-neuart]', erg); if (e2) e2.onclick = () => { ov.remove(); artikelDialog(null, { name: inp.value.trim(), im_vorrat: false }, null, true); };
+    const e2 = $('[data-neuart]', erg); if (e2) e2.onclick = () => { ov.remove(); artikelDialog(null, { name: inp.value.trim(), liste: 'sonstige' }, null, true); };
   }
   inp.value = start; inp.oninput = zeige; zeige(); setTimeout(() => inp.focus(), 50);
 }
@@ -988,7 +993,7 @@ function neuerArtikelFrage(ak) {
     let p;
     try { p = await aktionAlsFreitext(ak); } catch (e) { fehler(e); render(); return; }
     render();
-    artikelDialog(null, { name: ak.name.replace(/\s*·\s*/g, ' '), kategorie: ak.kategorie, standardladen: ak.laden, laeden: [ak.laden], nur_aktion: false, mindestbestand: 0, im_vorrat: false }, p);
+    artikelDialog(null, { name: ak.name.replace(/\s*·\s*/g, ' '), kategorie: ak.kategorie, standardladen: ak.laden, laeden: [ak.laden], nur_aktion: false, mindestbestand: 0, liste: 'sonstige' }, p);
   };
 }
 
@@ -1080,20 +1085,21 @@ function renderArtikel(main) {
   S.filter = 'alle';
   const sm = suchMuster(q);
   if (!admin) S.vListe = 'vorrat';
-  const haeufig = S.vListe === 'haeufig';
-  const nVorrat = S.artikel.filter(imVorrat).length, nHaeufig = S.artikel.length - nVorrat;
-  const arts = S.artikel.filter(a => imVorrat(a) !== haeufig && (!q || passtSuche(a.name + ' ' + (a.kategorie || '') + ' ' + (a.bemerkung || ''), sm)) && filterFn(S.filter)(a));
+  const vl = LISTEN.some(l => l[0] === S.vListe) ? S.vListe : 'vorrat';
+  const haeufig = vl !== 'vorrat';   // ohne Bestand
+  const anzahl = l => S.artikel.filter(a => listeVon(a) === l).length;
+  const arts = S.artikel.filter(a => listeVon(a) === vl && (!q || passtSuche(a.name + ' ' + (a.kategorie || '') + ' ' + (a.bemerkung || ''), sm)) && filterFn(S.filter)(a));
   const minZeigen = admin && store.get('einkauf-min-zeigen') !== 'nein';
   let html = (admin ? `<div class="chips" role="group" aria-label="Liste wählen">
-      <button class="chip" data-vl="vorrat" aria-pressed="${!haeufig}">Vorrat (${nVorrat})</button>
-      <button class="chip" data-vl="haeufig" aria-pressed="${haeufig}">Häufig gekauft (${nHaeufig})</button>
+      ${LISTEN.map(([k, t]) => `<button class="chip" data-vl="${k}" aria-pressed="${vl === k}">${t} (${anzahl(k)})</button>`).join('')}
       <button class="btn small" id="zuordnen" style="margin-left:auto">Zuordnen …</button></div>` : '')
-    + `<input class="search" id="aSuche" placeholder="${haeufig ? 'Häufig gekaufte Artikel suchen …' : 'Artikel suchen …'}" value="${esc(S.suche)}" autocomplete="off">
-    <p class="sum">${haeufig ? 'Diese Artikel haben keinen Bestand und erscheinen nicht im Vorrat. Du findest sie beim Zusammenstellen der Einkaufsliste über «+ Hinzufügen». Im orangen Feld kannst du sie auch hier direkt auf die Liste setzen.'
+    + `<input class="search" id="aSuche" placeholder="${vl === 'haeufig' ? 'Häufig gekaufte Artikel suchen …' : vl === 'sonstige' ? 'Sonstige Artikel suchen …' : 'Artikel suchen …'}" value="${esc(S.suche)}" autocomplete="off">
+    <p class="sum">${vl === 'sonstige' ? 'Artikel, die ihr nur ab und zu kauft. Kein Bestand, nicht im Vorrat. In der Suche unter «+ Hinzufügen» erscheinen sie nach den Vorrats- und häufig gekauften Artikeln.'
+      : haeufig ? 'Diese Artikel haben keinen Bestand und erscheinen nicht im Vorrat. Du findest sie beim Zusammenstellen der Einkaufsliste über «+ Hinzufügen». Im orangen Feld kannst du sie auch hier direkt auf die Liste setzen.'
       : admin ? `Bestand${minZeigen ? ' und Minimum' : ''} mit − / + anpassen. Im orangen Feld setzt + den Artikel mit der gewünschten Anzahl auf die Einkaufsliste. Für alles andere auf den Namen tippen.
       <button class="btn small" id="minUmschalten" style="margin-left:6px">${minZeigen ? 'Minimum ausblenden' : 'Minimum einblenden'}</button>` : 'Bestand mit − / + anpassen, wenn etwas aufgebraucht oder dazugekommen ist. Das wird sofort gespeichert.'}</p>`;
   if (admin && !q && !haeufig) html += unterMinBlock();
-  if (!arts.length) html += `<div class="card"><div class="empty">${haeufig && !q ? 'Noch keine häufig gekauften Artikel. Mit «Zuordnen …» nimmst du Artikel aus dem Vorrat heraus, oder lege mit «+ Neuer Artikel» einen an.' : 'Keine Artikel gefunden.'}</div></div>`;
+  if (!arts.length) html += `<div class="card"><div class="empty">${haeufig && !q ? `Noch keine Artikel unter «${esc(LISTEN.find(l => l[0] === vl)[1])}». Mit «Zuordnen …» verschiebst du Artikel hierher, oder lege mit «+ Neuer Artikel» einen an.` : 'Keine Artikel gefunden.'}</div></div>`;
   const g = gruppiere(arts.sort((x, y) => katSort(x.kategorie, y.kategorie) || coll.compare(x.name, y.name)), a => a.kategorie || OHNE_KAT);
   for (const [kat, as] of g) {
     html += `<h2>${esc(kat)} <span class="sum">${as.length}</span></h2><div class="card">`;
@@ -1138,33 +1144,32 @@ function renderArtikel(main) {
   main.querySelectorAll('[data-vl]').forEach(b => b.onclick = () => { S.vListe = b.dataset.vl; S.suche = ''; window.scrollTo(0, 0); render(); });
   const zu = $('#zuordnen'); if (zu) zu.onclick = zuordnenDialog;
   const mu = $('#minUmschalten');
-  if (admin) { $('#neu').onclick = () => artikelDialog(null, { im_vorrat: !haeufig }); $('#export').onclick = exportCsv; if (mu) mu.onclick = () => { store.set('einkauf-min-zeigen', minZeigen ? 'nein' : 'ja'); render(); }; }
+  if (admin) { $('#neu').onclick = () => artikelDialog(null, { liste: vl }); $('#export').onclick = exportCsv; if (mu) mu.onclick = () => { store.set('einkauf-min-zeigen', minZeigen ? 'nein' : 'ja'); render(); }; }
 }
 
 /* Zuordnen: pro Artikel schnell festlegen, ob er im Vorrat erscheint oder nur über die Suche */
 function zuordnenDialog() {
-  const ov = dialog(`<h2>Vorrat oder häufig gekauft?</h2>
-    <p class="sum">Häkchen = erscheint im Vorrat (mit Bestand und Minimum). Ohne Häkchen = nur über die Suche beim Zusammenstellen der Einkaufsliste. Wird sofort gespeichert.</p>
+  const ov = dialog(`<h2>Artikel zuordnen</h2>
+    <p class="sum">Vorrat = mit Bestand und Minimum. Häufig gekauft und Sonstige = ohne Bestand, nur über die Suche beim Zusammenstellen der Einkaufsliste (Sonstige erscheinen dort weiter unten). Wird sofort gespeichert.</p>
     <input class="search" id="zSuche" placeholder="Artikel suchen …" autocomplete="off">
-    <div class="chips"><button class="chip" data-zf="alle" aria-pressed="true">Alle</button><button class="chip" data-zf="v" aria-pressed="false">Nur Vorrat</button><button class="chip" data-zf="h" aria-pressed="false">Nur häufig gekauft</button></div>
+    <div class="chips"><button class="chip" data-zf="alle" aria-pressed="true">Alle</button>${LISTEN.map(([k, t]) => `<button class="chip" data-zf="${k}" aria-pressed="false">${t}</button>`).join('')}</div>
     <div id="zListe"></div>
     <div class="actions"><button class="btn primary" data-close>Fertig</button></div>`);
   let zf = 'alle';
   const zeige = () => {
     const m = suchMuster($('#zSuche', ov).value);
-    const arts = S.artikel.filter(a => passtSuche(a.name + ' ' + (a.kategorie || ''), m) && (zf === 'alle' || (zf === 'v') === imVorrat(a)))
+    const arts = S.artikel.filter(a => passtSuche(a.name + ' ' + (a.kategorie || ''), m) && (zf === 'alle' || listeVon(a) === zf))
       .sort((x, y) => katSort(x.kategorie, y.kategorie) || coll.compare(x.name, y.name));
     let h = arts.length ? '' : '<div class="card"><div class="empty">Keine Artikel gefunden.</div></div>';
     for (const [kat, as] of gruppiere(arts, a => a.kategorie || OHNE_KAT)) {
-      h += `<h3>${esc(kat)}</h3><div class="card">${as.map(a => `<label class="row" style="cursor:pointer"><input type="checkbox" class="check" data-zid="${a.id}" ${imVorrat(a) ? 'checked' : ''}>
-        <div class="main"><div class="name">${esc(a.name)}</div><div class="meta" data-zmeta>${imVorrat(a) ? 'im Vorrat' : 'häufig gekauft (nur Suche)'}</div></div></label>`).join('')}</div>`;
+      h += `<h3>${esc(kat)}</h3><div class="card">${as.map(a => `<div class="row"><div class="main"><div class="name">${esc(a.name)}</div></div>
+        <select class="laden" data-zid="${a.id}" aria-label="Liste">${LISTEN.map(([k, t]) => `<option value="${k}" ${listeVon(a) === k ? 'selected' : ''}>${t}</option>`).join('')}</select></div>`).join('')}</div>`;
     }
     $('#zListe', ov).innerHTML = h;
-    ov.querySelectorAll('[data-zid]').forEach(cb => cb.onchange = async () => {
-      const a = artById(+cb.dataset.zid), wert = cb.checked;
-      cb.closest('.row').querySelector('[data-zmeta]').textContent = wert ? 'im Vorrat' : 'häufig gekauft (nur Suche)';
-      try { Object.assign(a, await S.api.artikelAendern(a.id, { im_vorrat: wert })); }
-      catch (e) { cb.checked = !wert; fehler(e); }
+    ov.querySelectorAll('[data-zid]').forEach(sel => sel.onchange = async () => {
+      const a = artById(+sel.dataset.zid), alt = listeVon(a);
+      try { Object.assign(a, await S.api.artikelAendern(a.id, listeSetzen(sel.value))); toast(`«${a.name}»: ${LISTEN_TEXT[sel.value]}.`); }
+      catch (e) { sel.value = alt; fehler(e); }
     });
   };
   $('#zSuche', ov).oninput = zeige;
@@ -1176,7 +1181,7 @@ function zuordnenDialog() {
 
 /* Artikel anlegen / bearbeiten – alle Felder, damit die Tabelle vollständig bleibt */
 function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
-  const neu = !a; const v = Object.assign({ laeden: [], routine: null, nur_aktion: false, mindestbestand: 0, im_vorrat: true }, a || vorlage);
+  const neu = !a; const v = Object.assign({ laeden: [], routine: null, nur_aktion: false, mindestbestand: 0, liste: 'vorrat' }, a || vorlage);
   const ov = dialog(`<h2>${neu ? 'Neuer Artikel' : 'Artikel bearbeiten'}</h2>
     <form id="aForm" novalidate>
     <div class="field"><label for="fName">Name *</label><input type="text" id="fName" value="${esc(v.name || '')}" placeholder="z. B. M-Classic Thon"></div>
@@ -1185,9 +1190,8 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
     <div class="field"><label for="fStd">Standardladen *</label><select id="fStd"><option value="">– wählen –</option>${LAEDEN.map(l => `<option ${l === v.standardladen ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
       <div class="hint">Dort landet der Artikel automatisch auf der Liste.</div></div>
     <div class="field"><div class="lbl">Wo erscheint der Artikel?</div><div class="opts">
-      <label class="opt"><input type="radio" name="vorrat" value="ja" ${v.im_vorrat !== false ? 'checked' : ''}>Im Vorrat (mit Bestand)</label>
-      <label class="opt"><input type="radio" name="vorrat" value="nein" ${v.im_vorrat === false ? 'checked' : ''}>Häufig gekauft (nur Suche)</label></div>
-      <div class="hint">«Häufig gekauft» erscheint nicht im Vorrat, ist aber beim Zusammenstellen der Einkaufsliste über die Suche auffindbar.</div></div>
+      ${LISTEN.map(([k, t]) => `<label class="opt"><input type="radio" name="vorrat" value="${k}" ${listeVon(v) === k ? 'checked' : ''}>${k === 'vorrat' ? 'Vorrat (mit Bestand)' : t}</label>`).join('')}</div>
+      <div class="hint">«Häufig gekauft» und «Sonstige» erscheinen nicht im Vorrat, sind aber beim Zusammenstellen der Einkaufsliste über die Suche auffindbar.</div></div>
     <div class="field"><div class="lbl">Nur in Aktion kaufen?</div><div class="opts">
       <label class="opt"><input type="radio" name="aktion" value="nein" ${!v.nur_aktion ? 'checked' : ''}>Nein</label>
       <label class="opt"><input type="radio" name="aktion" value="ja" ${v.nur_aktion ? 'checked' : ''}>Ja</label></div></div>
@@ -1209,7 +1213,7 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
   const rmWrap = $('#fRmWrap', ov);
   const sync = () => {
     rmWrap.style.display = ov.querySelector('input[name=routine]:checked')?.value === 'ja' ? '' : 'none';
-    $('#fBestWrap', ov).style.display = ov.querySelector('input[name=vorrat]:checked')?.value === 'nein' ? 'none' : '';
+    $('#fBestWrap', ov).style.display = ov.querySelector('input[name=vorrat]:checked')?.value === 'vorrat' ? '' : 'none';
   };
   ov.querySelectorAll('input[name=routine], input[name=vorrat]').forEach(r => r.onchange = sync); sync();
   // Standardladen gilt automatisch als "erhältlich bei"
@@ -1235,7 +1239,7 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
       nur_aktion: ov.querySelector('input[name=aktion]:checked').value === 'ja',
       routine: routineV === 'ja', routine_menge: routineV === 'ja' ? rm : null,
       bestand: best, mindestbestand: min, bemerkung: $('#fBem', ov).value.trim() || null,
-      im_vorrat: ov.querySelector('input[name=vorrat]:checked').value === 'ja',
+      ...listeSetzen(ov.querySelector('input[name=vorrat]:checked').value),
     };
     $('#fOk', ov).disabled = true;
     try {
@@ -1268,11 +1272,11 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
 }
 
 function exportCsv() {
-  const kopf = ['Produkt', ...LAEDEN, 'Standardladen', 'Nur in Aktion', 'Routine', 'Routine-Menge / Woche', 'Bestand aktuell', 'Mindestbestand', 'Kategorie', 'Bemerkung', 'Im Vorrat'];
+  const kopf = ['Produkt', ...LAEDEN, 'Standardladen', 'Nur in Aktion', 'Routine', 'Routine-Menge / Woche', 'Bestand aktuell', 'Mindestbestand', 'Kategorie', 'Bemerkung', 'Liste'];
   const zelle = v => { const s = v === null || v === undefined ? '' : String(v); return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const zeilen = S.artikel.slice().sort((x, y) => katSort(x.kategorie, y.kategorie) || coll.compare(x.name, y.name)).map(a => [
     a.name, ...LAEDEN.map(l => (a.laeden || []).includes(l) ? 'x' : ''), a.standardladen, a.nur_aktion ? 'ja' : 'nein', a.routine ? 'ja' : 'nein',
-    a.routine_menge, fmt(a.bestand), fmt(a.mindestbestand), a.kategorie, a.bemerkung, imVorrat(a) ? 'ja' : 'nein']);
+    a.routine_menge, fmt(a.bestand), fmt(a.mindestbestand), a.kategorie, a.bemerkung, LISTEN.find(l => l[0] === listeVon(a))[1]]);
   const csv = '﻿' + [kopf, ...zeilen].map(r => r.map(zelle).join(';')).join('\r\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   const link = document.createElement('a');
@@ -1366,7 +1370,7 @@ async function startMitSitzung(session) {
 }
 
 /* Menü oben rechts */
-const APP_VERSION = '2026-11-17b';
+const APP_VERSION = '2026-11-17c';
 function menue() {
   const admin = S.profil && S.profil.rolle === 'admin';
   const ov = dialog(`<h2>Menü</h2>
