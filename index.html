@@ -299,7 +299,7 @@ function demoApi() {
 /* ---------- Zustand ---------- */
 const S = {
   api: null, artikel: [], einkauf: null, pos: [], frueher: [],
-  tab: 'einkaufen', vListe: 'vorrat', suche: '', filter: 'alle', laden: 'alle', ekLaden: 'alle', aktionen: [], akLaden: 'Denner', akWoche: 0, akSuche: '', akFilter: 'alle',
+  tab: 'einkaufen', vListe: 'vorrat', suche: '', filter: 'alle', laden: 'alle', ekLaden: 'alle', ekSuche: '', aktionen: [], akLaden: 'Denner', akWoche: 0, akSuche: '', akFilter: 'alle',
 };
 const posFor = id => S.pos.find(p => p.artikel_id === id);
 const artById = id => S.artikel.find(a => a.id === id);
@@ -459,13 +459,16 @@ function renderEinkaufen(main) {
   const weitere = LAEDEN.concat([OHNE_LADEN]).filter(l => !['Migros', 'Denner'].includes(l) && liste.some(i => i.laden === l));
   const reiter = [['alle', 'Gesamt'], ['Migros', 'Migros'], ['Denner', 'Denner']].concat(weitere.map(l => [l, l]));
   if (!reiter.some(r => r[0] === S.ekLaden)) S.ekLaden = 'alle';
-  const sichtbar = liste.filter(i => S.ekLaden === 'alle' || i.laden === S.ekLaden);
+  const eq = S.ekSuche.trim(), em = suchMuster(eq);
+  const sichtbar = liste.filter(i => (S.ekLaden === 'alle' || i.laden === S.ekLaden) && passtSuche(i.name + ' ' + (i.kategorie || '') + ' ' + ((i.p && i.p.bemerkung) || ''), em));
   const offen = sichtbar.filter(i => !(i.p && i.p.gekauft)).length;
   const erledigt = S.einkauf && S.einkauf.erledigt_am;
   let html = admin ? hinweise(liste) : (erledigt ? `<div class="hinweis ok"><b>Als erledigt gemeldet.</b></div>` : '');
   if (admin) html += vorschlagBlock(liste);
+  html += `<input class="search" id="ekSuche" placeholder="In der Einkaufsliste suchen …" value="${esc(S.ekSuche)}" autocomplete="off" style="margin-top:6px">`;
   html += `<div class="chips" role="group" aria-label="Liste wählen">${reiter.map(([k, t]) => `<button class="chip" data-r="${esc(k)}" aria-pressed="${S.ekLaden === k}">${esc(t)} (${liste.filter(i => k === 'alle' || i.laden === k).length})</button>`).join('')}</div>`;
-  if (!sichtbar.length) html += `<div class="card"><div class="empty">${admin ? 'Noch nichts auf der Liste. Routineartikel und Artikel unter dem Minimum erscheinen automatisch. Mit «+ Hinzufügen» oder im Reiter Aktionen kommt mehr dazu.' : 'Keine Artikel auf dieser Liste.'}</div></div>`;
+  if (!sichtbar.length && eq) html += `<div class="card"><div class="empty">«${esc(eq)}» ist nicht auf dieser Liste.${admin ? ` <button class="btn small primary" id="ekHinzu" style="margin-left:6px">+ Hinzufügen</button>` : ''}</div></div>`;
+  else if (!sichtbar.length) html += `<div class="card"><div class="empty">${admin ? 'Noch nichts auf der Liste. Routineartikel und Artikel unter dem Minimum erscheinen automatisch. Mit «+ Hinzufügen» oder im Reiter Aktionen kommt mehr dazu.' : 'Keine Artikel auf dieser Liste.'}</div></div>`;
   const g = gruppiere(sichtbar, i => i.laden);
   for (const l of LAEDEN.concat([OHNE_LADEN])) {
     const its = g.get(l); if (!its) continue;
@@ -488,6 +491,9 @@ function renderEinkaufen(main) {
   main.innerHTML = html;
 
   main.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { S.ekLaden = b.dataset.r; render(); });
+  const es = $('#ekSuche');
+  es.oninput = () => { S.ekSuche = es.value; const pos = es.selectionStart; render(); const n = $('#ekSuche'); n.focus(); n.setSelectionRange(pos, pos); };
+  const eh = $('#ekHinzu'); if (eh) eh.onclick = () => hinzufuegenDialog(eq);
   const map = new Map(liste.map(i => [i.a ? 'a' + i.a.id : 'p' + i.p.id, i]));
   main.querySelectorAll('.row[data-key]').forEach(row => {
     const i = map.get(row.dataset.key); if (!i) return;
@@ -692,7 +698,7 @@ async function kopiereText(t) {
 }
 
 /* Hinzufügen: Vorratsartikel, frühere Zusatzartikel oder neuer Freitext */
-function hinzufuegenDialog() {
+function hinzufuegenDialog(start = '') {
   const ov = dialog(`<h2>Zur Liste hinzufügen</h2>
     <input class="search" id="hSuche" placeholder="Artikel suchen oder neu eingeben …" autocomplete="off">
     <div id="hErg" class="card" style="margin-top:10px"></div>
@@ -732,7 +738,7 @@ function hinzufuegenDialog() {
     const e1 = $('[data-einmal]', erg); if (e1) e1.onclick = () => zusatzDialog(inp.value.trim(), null, null, () => { inp.value = ''; zeige(); });
     const e2 = $('[data-neuart]', erg); if (e2) e2.onclick = () => { ov.remove(); artikelDialog(null, { name: inp.value.trim(), im_vorrat: false }, null, true); };
   }
-  inp.oninput = zeige; zeige(); setTimeout(() => inp.focus(), 50);
+  inp.value = start; inp.oninput = zeige; zeige(); setTimeout(() => inp.focus(), 50);
 }
 
 function zusatzDialog(name, kat, laden, danach) {
@@ -1360,7 +1366,7 @@ async function startMitSitzung(session) {
 }
 
 /* Menü oben rechts */
-const APP_VERSION = '2026-11-17a';
+const APP_VERSION = '2026-11-17b';
 function menue() {
   const admin = S.profil && S.profil.rolle === 'admin';
   const ov = dialog(`<h2>Menü</h2>
