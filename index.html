@@ -464,16 +464,16 @@ function renderEinkaufen(main) {
   const weitere = LAEDEN.concat([OHNE_LADEN]).filter(l => !['Migros', 'Denner'].includes(l) && liste.some(i => i.laden === l));
   const reiter = [['alle', 'Gesamt'], ['Migros', 'Migros'], ['Denner', 'Denner']].concat(weitere.map(l => [l, l]));
   if (!reiter.some(r => r[0] === S.ekLaden)) S.ekLaden = 'alle';
-  const eq = S.ekSuche.trim(), em = suchMuster(eq);
-  const sichtbar = liste.filter(i => (S.ekLaden === 'alle' || i.laden === S.ekLaden) && passtSuche(i.name + ' ' + (i.kategorie || '') + ' ' + ((i.p && i.p.bemerkung) || ''), em));
+  const eq = admin ? S.ekSuche.trim() : '';
+  const sichtbar = liste.filter(i => S.ekLaden === 'alle' || i.laden === S.ekLaden);
   const offen = sichtbar.filter(i => !(i.p && i.p.gekauft)).length;
   const erledigt = S.einkauf && S.einkauf.erledigt_am;
   let html = admin ? hinweise(liste) : (erledigt ? `<div class="hinweis ok"><b>Als erledigt gemeldet.</b></div>` : '');
   if (admin) html += vorschlagBlock(liste);
-  html += `<input class="search" id="ekSuche" placeholder="In der Einkaufsliste suchen …" value="${esc(S.ekSuche)}" autocomplete="off" style="margin-top:6px">`;
+  if (admin) html += `<input class="search" id="ekSuche" placeholder="Produkt suchen und auf die Liste setzen …" value="${esc(S.ekSuche)}" autocomplete="off" style="margin-top:6px">
+    ${eq ? `<div id="ekErg" class="card" style="margin-top:8px"></div><p style="margin:6px 0 0;text-align:right"><button class="btn small" id="ekLeeren">Suche schliessen</button></p>` : ''}`;
   html += `<div class="chips" role="group" aria-label="Liste wählen">${reiter.map(([k, t]) => `<button class="chip" data-r="${esc(k)}" aria-pressed="${S.ekLaden === k}">${esc(t)} (${liste.filter(i => k === 'alle' || i.laden === k).length})</button>`).join('')}</div>`;
-  if (!sichtbar.length && eq) html += `<div class="card"><div class="empty">«${esc(eq)}» ist nicht auf dieser Liste.${admin ? ` <button class="btn small primary" id="ekHinzu" style="margin-left:6px">+ Hinzufügen</button>` : ''}</div></div>`;
-  else if (!sichtbar.length) html += `<div class="card"><div class="empty">${admin ? 'Noch nichts auf der Liste. Routineartikel und Artikel unter dem Minimum erscheinen automatisch. Mit «+ Hinzufügen» oder im Reiter Aktionen kommt mehr dazu.' : 'Keine Artikel auf dieser Liste.'}</div></div>`;
+  if (!sichtbar.length) html += `<div class="card"><div class="empty">${admin ? 'Noch nichts auf der Liste. Routineartikel und Artikel unter dem Minimum erscheinen automatisch. Mit «+ Hinzufügen» oder im Reiter Aktionen kommt mehr dazu.' : 'Keine Artikel auf dieser Liste.'}</div></div>`;
   const g = gruppiere(sichtbar, i => i.laden);
   for (const l of LAEDEN.concat([OHNE_LADEN])) {
     const its = g.get(l); if (!its) continue;
@@ -497,8 +497,10 @@ function renderEinkaufen(main) {
 
   main.querySelectorAll('[data-r]').forEach(b => b.onclick = () => { S.ekLaden = b.dataset.r; render(); });
   const es = $('#ekSuche');
-  es.oninput = () => { S.ekSuche = es.value; const pos = es.selectionStart; render(); const n = $('#ekSuche'); n.focus(); n.setSelectionRange(pos, pos); };
-  const eh = $('#ekHinzu'); if (eh) eh.onclick = () => hinzufuegenDialog(eq);
+  if (es) es.oninput = () => { S.ekSuche = es.value; const pos = es.selectionStart; render(); const n = $('#ekSuche'); n.focus(); n.setSelectionRange(pos, pos); };
+  const ee = $('#ekErg');
+  if (ee) produktSuche(ee, S.ekSuche, { neuZeichnen: render, leeren: () => { S.ekSuche = ''; } });
+  const el = $('#ekLeeren'); if (el) el.onclick = () => { S.ekSuche = ''; render(); };
   const map = new Map(liste.map(i => [i.a ? 'a' + i.a.id : 'p' + i.p.id, i]));
   main.querySelectorAll('.row[data-key]').forEach(row => {
     const i = map.get(row.dataset.key); if (!i) return;
@@ -703,46 +705,51 @@ async function kopiereText(t) {
 }
 
 /* Hinzufügen: Vorratsartikel, frühere Zusatzartikel oder neuer Freitext */
+/* Produktsuche: Vorratsartikel, häufig gekaufte, sonstige und früher hinzugefügte Zusatzartikel.
+   Wird im Hinzufügen-Dialog und im Suchfeld der Einkaufsliste verwendet. */
+function produktSuche(erg, roh, { neuZeichnen, leeren, schliessen, ohneFrueher } = {}) {
+  const frueher = [...new Map(S.frueher.map(f => [f.freitext.toLowerCase(), f])).values()];
+  const q = roh.trim().toLowerCase();
+  const listeJetzt = berechneListe().liste;
+  const mengeAuf = new Map(listeJetzt.filter(i => i.a).map(i => [i.a.id, i.menge]));
+  const m = suchMuster(q);
+  const treffer = S.artikel.filter(a => !q || passtSuche(a.name + ' ' + (a.kategorie || '') + ' ' + (a.bemerkung || ''), m)).sort((x, y) => ((listeVon(x) === 'sonstige') - (listeVon(y) === 'sonstige')) || coll.compare(x.name, y.name)).slice(0, q ? 30 : 0);
+  const zus = frueher.filter(f => (!q || passtSuche(f.freitext + ' ' + (f.kategorie || ''), m)) && !S.pos.some(p => !p.artikel_id && p.freitext.toLowerCase() === f.freitext.toLowerCase()));
+  let h = '';
+  for (const a of treffer) h += `<div class="result"><div class="main"><div class="name">${esc(a.name)}</div><div class="meta">${a.standardladen ? ladenPill(a.standardladen) : ''} ${esc(a.kategorie || '')}${imVorrat(a) ? ' · ' + vorratText(a) : ` · <span class="tag grau">${LISTEN_TEXT[listeVon(a)]}</span>`}${aktionFuer(a) ? ' <span class="tag aktion">in Aktion</span>' : ''}</div></div>
+    ${mengeAuf.has(a.id) ? `<span class="tag">auf Liste: ${fmt(mengeAuf.get(a.id))}</span>` : `<button class="btn small primary" data-art="${a.id}">+ auf Liste</button>`}</div>`;
+  if (!q && zus.length && !ohneFrueher) {
+    h += `<div class="result"><h3 style="margin:0">Früher hinzugefügt</h3></div>`;
+    const g = gruppiere(zus.sort((x, y) => katSort(x.kategorie, y.kategorie)), f => f.kategorie || OHNE_KAT);
+    for (const [k, fs] of g) h += `<div class="result"><div class="main"><div class="meta">${esc(k)}</div><div class="opts" style="margin-top:4px">${fs.map(f => `<button class="chip" data-frueher="${esc(f.freitext)}">+ ${esc(f.freitext)}</button>`).join('')}</div></div></div>`;
+  } else if (q) {
+    for (const f of zus.slice(0, 10)) h += `<div class="result"><div class="main"><div class="name">${esc(f.freitext)}</div><div class="meta">früher hinzugefügt · ${esc(f.kategorie || '')}</div></div><button class="btn small primary" data-frueher="${esc(f.freitext)}">+ auf Liste</button></div>`;
+  }
+  if (q && !S.artikel.some(a => a.name.toLowerCase() === q)) {
+    h += `<div class="result"><div class="main"><div class="name">«${esc(roh.trim())}»</div><div class="meta">${treffer.length ? 'etwas anderes, neu' : 'nicht gefunden, neu'}</div></div>
+      <button class="btn small" data-einmal>Nur diese Woche</button><button class="btn small primary" data-neuart>Als Artikel speichern</button></div>`;
+  }
+  erg.innerHTML = h || '<div class="empty">Tippe einen Namen ein. Früher hinzugefügte Zusatzartikel erscheinen hier.</div>';
+  erg.querySelectorAll('[data-art]').forEach(b => b.onclick = async () => {
+    const a = artById(+b.dataset.art), p = posFor(a.id);
+    await setzePos({ a, p }, { aufnehmen: true, menge_fix: (p && p.menge_fix) || Math.max(1, grund(a).menge) });
+    toast(`«${a.name}» auf der Liste.`); if (neuZeichnen) neuZeichnen();
+  });
+  erg.querySelectorAll('[data-frueher]').forEach(b => b.onclick = () => {
+    const f = frueher.find(x => x.freitext === b.dataset.frueher);
+    zusatzDialog(f.freitext, f.kategorie, f.laden, neuZeichnen);
+  });
+  const e1 = $('[data-einmal]', erg); if (e1) e1.onclick = () => zusatzDialog(roh.trim(), null, null, () => { if (leeren) leeren(); if (neuZeichnen) neuZeichnen(); });
+  const e2 = $('[data-neuart]', erg); if (e2) e2.onclick = () => { if (schliessen) schliessen(); if (leeren) leeren(); artikelDialog(null, { name: roh.trim(), liste: 'sonstige' }, null, true); };
+}
+
 function hinzufuegenDialog(start = '') {
   const ov = dialog(`<h2>Zur Liste hinzufügen</h2>
     <input class="search" id="hSuche" placeholder="Artikel suchen oder neu eingeben …" autocomplete="off">
     <div id="hErg" class="card" style="margin-top:10px"></div>
     <div class="actions"><button class="btn" data-close>Fertig</button></div>`);
   const inp = $('#hSuche', ov), erg = $('#hErg', ov);
-  const frueher = [...new Map(S.frueher.map(f => [f.freitext.toLowerCase(), f])).values()];
-  function zeige() {
-    const q = inp.value.trim().toLowerCase();
-    const aufListe = new Set(berechneListe().liste.filter(i => i.a).map(i => i.a.id));
-    const m = suchMuster(q);
-    const treffer = S.artikel.filter(a => !q || passtSuche(a.name + ' ' + (a.kategorie || ''), m)).sort((x, y) => ((listeVon(x) === 'sonstige') - (listeVon(y) === 'sonstige')) || coll.compare(x.name, y.name)).slice(0, q ? 30 : 0);
-    const zus = frueher.filter(f => (!q || passtSuche(f.freitext + ' ' + (f.kategorie || ''), m)) && !S.pos.some(p => !p.artikel_id && p.freitext.toLowerCase() === f.freitext.toLowerCase()));
-    let h = '';
-    for (const a of treffer) h += `<div class="result"><div class="main"><div class="name">${esc(a.name)}</div><div class="meta">${a.standardladen ? ladenPill(a.standardladen) : ''} ${esc(a.kategorie || '')}${imVorrat(a) ? ' · ' + vorratText(a) : ` · <span class="tag grau">${LISTEN_TEXT[listeVon(a)]}</span>`}</div></div>
-      ${aufListe.has(a.id) ? '<span class="tag">auf Liste</span>' : `<button class="btn small" data-art="${a.id}">+</button>`}</div>`;
-    if (!q && zus.length) {
-      h += `<div class="result"><h3 style="margin:0">Früher hinzugefügt</h3></div>`;
-      const g = gruppiere(zus.sort((x, y) => katSort(x.kategorie, y.kategorie)), f => f.kategorie || OHNE_KAT);
-      for (const [k, fs] of g) h += `<div class="result"><div class="main"><div class="meta">${esc(k)}</div><div class="opts" style="margin-top:4px">${fs.map(f => `<button class="chip" data-frueher="${esc(f.freitext)}">+ ${esc(f.freitext)}</button>`).join('')}</div></div></div>`;
-    } else if (q) {
-      for (const f of zus.slice(0, 10)) h += `<div class="result"><div class="main"><div class="name">${esc(f.freitext)}</div><div class="meta">früher hinzugefügt · ${esc(f.kategorie || '')}</div></div><button class="btn small" data-frueher="${esc(f.freitext)}">+</button></div>`;
-    }
-    if (q && !S.artikel.some(a => a.name.toLowerCase() === q)) {
-      h += `<div class="result"><div class="main"><div class="name">«${esc(inp.value.trim())}»</div><div class="meta">neu</div></div>
-        <button class="btn small" data-einmal>Nur diese Woche</button><button class="btn small primary" data-neuart>Als Artikel speichern</button></div>`;
-    }
-    erg.innerHTML = h || '<div class="empty">Tippe einen Namen ein. Früher hinzugefügte Zusatzartikel erscheinen hier.</div>';
-    erg.querySelectorAll('[data-art]').forEach(b => b.onclick = async () => {
-      const a = artById(+b.dataset.art), p = posFor(a.id);
-      await setzePos({ a, p }, { aufnehmen: true, menge_fix: (p && p.menge_fix) || Math.max(1, grund(a).menge) });
-      toast(`«${a.name}» hinzugefügt.`); zeige();
-    });
-    erg.querySelectorAll('[data-frueher]').forEach(b => b.onclick = () => {
-      const f = frueher.find(x => x.freitext === b.dataset.frueher);
-      zusatzDialog(f.freitext, f.kategorie, f.laden, zeige);
-    });
-    const e1 = $('[data-einmal]', erg); if (e1) e1.onclick = () => zusatzDialog(inp.value.trim(), null, null, () => { inp.value = ''; zeige(); });
-    const e2 = $('[data-neuart]', erg); if (e2) e2.onclick = () => { ov.remove(); artikelDialog(null, { name: inp.value.trim(), liste: 'sonstige' }, null, true); };
-  }
+  const zeige = () => produktSuche(erg, inp.value, { neuZeichnen: zeige, leeren: () => { inp.value = ''; }, schliessen: () => ov.remove() });
   inp.value = start; inp.oninput = zeige; zeige(); setTimeout(() => inp.focus(), 50);
 }
 
@@ -1370,7 +1377,7 @@ async function startMitSitzung(session) {
 }
 
 /* Menü oben rechts */
-const APP_VERSION = '2026-11-17c';
+const APP_VERSION = '2026-11-17d';
 function menue() {
   const admin = S.profil && S.profil.rolle === 'admin';
   const ov = dialog(`<h2>Menü</h2>
