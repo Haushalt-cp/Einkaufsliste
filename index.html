@@ -254,7 +254,8 @@ function demoApi() {
     { id: 4, name: 'Tomatenpüree', laeden: ['Denner', 'Migros'], standardladen: 'Migros', nur_aktion: false, routine: false, routine_menge: null, bestand: 0, mindestbestand: 1, kategorie: 'Konserven & Saucen', bemerkung: null, aktiv: true },
     { id: 5, name: 'Bulgur', laeden: ['Denner', 'Türkengeschäft'], standardladen: 'Türkengeschäft', nur_aktion: false, routine: false, routine_menge: null, bestand: 3, mindestbestand: 1, kategorie: 'Teigwaren, Reis & Hülsenfrüchte', bemerkung: null, aktiv: true },
     { id: 6, name: 'Kohlrabi', laeden: ['Denner', 'Migros'], standardladen: null, nur_aktion: false, routine: true, routine_menge: 3, bestand: null, mindestbestand: null, kategorie: 'Brot & Frischware', bemerkung: null, aktiv: true },
-    { id: 7, name: 'Blumenkohl', laeden: ['Denner', 'Migros'], standardladen: 'Migros', nur_aktion: true, routine: false, routine_menge: null, bestand: null, mindestbestand: null, kategorie: null, bemerkung: null, aktiv: true },
+    { id: 7, name: 'Blumenkohl', laeden: ['Denner', 'Migros'], standardladen: 'Migros', nur_aktion: true, routine: false, routine_menge: null, bestand: null, mindestbestand: null, kategorie: null, bemerkung: null, aktiv: true, im_vorrat: false },
+    { id: 8, name: 'Bananen', laeden: ['Migros', 'Denner'], standardladen: 'Migros', nur_aktion: false, routine: false, routine_menge: null, bestand: null, mindestbestand: null, kategorie: 'Früchte und Gemüse', bemerkung: null, aktiv: true, im_vorrat: false },
   ];
   let E = []; let P = [];
   const d = x => JSON.parse(JSON.stringify(x));
@@ -298,7 +299,7 @@ function demoApi() {
 /* ---------- Zustand ---------- */
 const S = {
   api: null, artikel: [], einkauf: null, pos: [], frueher: [],
-  tab: 'einkaufen', suche: '', filter: 'alle', laden: 'alle', ekLaden: 'alle', aktionen: [], akLaden: 'Denner', akWoche: 0, akSuche: '', akFilter: 'alle',
+  tab: 'einkaufen', vListe: 'vorrat', suche: '', filter: 'alle', laden: 'alle', ekLaden: 'alle', aktionen: [], akLaden: 'Denner', akWoche: 0, akSuche: '', akFilter: 'alle',
 };
 const posFor = id => S.pos.find(p => p.artikel_id === id);
 const artById = id => S.artikel.find(a => a.id === id);
@@ -345,10 +346,12 @@ const katAuswahl = (id, wert) => { const w = wert ? dennerKategorie(wert) : ''; 
 const aktionenNormalisiert = liste => liste.map(x => ({ ...x, kategorie: dennerKategorie(x.kategorie, x.name) }));
 
 /* ---------- Einkaufslogik ---------- */
+// Artikel mit im_vorrat = false sind «häufig gekauft»: nur über die Suche, ohne Bestand
+const imVorrat = a => !!a && a.im_vorrat !== false;
 // Grundmenge ohne Wochenanpassung
 function grund(a) {
   if (a.routine) return { menge: a.routine_menge || 0, grund: 'Routine' };
-  if (isNum(a.bestand) && isNum(a.mindestbestand) && a.bestand <= a.mindestbestand)
+  if (imVorrat(a) && isNum(a.bestand) && isNum(a.mindestbestand) && a.bestand <= a.mindestbestand)
     return { menge: a.mindestbestand - a.bestand + 1, grund: 'Nachkaufen' };
   return { menge: 0, grund: '' };
 }
@@ -427,7 +430,7 @@ function gruppiere(items, key) {
 
 /* ===== Einkaufsliste ===== */
 function vorratText(a) {
-  if (!a) return '';
+  if (!imVorrat(a)) return '';
   const b = isNum(a.bestand) ? fmt(a.bestand) : '?';
   const unter = isNum(a.bestand) && isNum(a.mindestbestand) && a.bestand <= a.mindestbestand;
   return `<span class="${unter ? 'tag warn' : 'tag grau'}">Vorrat ${b}${isNum(a.mindestbestand) ? ' / Min ' + fmt(a.mindestbestand) : ''}</span>`;
@@ -529,7 +532,7 @@ function einkaufZeile(i, admin) {
   const meta = [esc(i.kategorie)];
   if (p.in_aktion) meta.push('<span class="tag aktion">Aktion</span>');
   if (admin && i.grund && i.grund !== 'Aktion') meta.push(`<span class="tag grau">${esc(i.grund)}</span>`);
-  if (admin && i.a) meta.push(vorratText(i.a));
+  if (admin && imVorrat(i.a)) meta.push(vorratText(i.a));
   if (gekauftAnders(i)) meta.push(`<span class="tag warn">${fmt(p.menge_gekauft)} von ${fmt(i.menge)}</span>`);
   if (admin && anders) meta.push('<span class="tag">nur diese Woche</span>');
   return `<div class="row${p.gekauft ? ' done' : ''}${p.nicht_erhaeltlich ? ' na' : ''}" data-key="${key}">
@@ -650,7 +653,7 @@ function zeilenMenue(i) {
       <button class="btn" id="mNA">${p.nicht_erhaeltlich ? 'Wieder erhältlich' : 'Nicht erhältlich'}</button>
       <button class="btn danger" id="mWeg">Diese Woche entfernen</button>
       ${i.a ? `<button class="btn" id="mBearb">Artikel bearbeiten</button>` : ''}
-      ${!i.a ? `<button class="btn" id="mAlsArtikel">Als Vorratsartikel speichern</button>` : ''}
+      ${!i.a ? `<button class="btn" id="mAlsArtikel">Als Artikel speichern</button>` : ''}
     </div>
     <div class="actions"><button class="btn" data-close>Schliessen</button><button class="btn primary" id="mOk">Speichern</button></div>`);
   $('#mOk', ov).onclick = async () => {
@@ -665,7 +668,7 @@ function zeilenMenue(i) {
   $('#mNA', ov).onclick = () => { setzePos(i, { nicht_erhaeltlich: !p.nicht_erhaeltlich }); ov.remove(); };
   $('#mWeg', ov).onclick = () => { ov.remove(); entfernen(i); };
   if (i.a) $('#mBearb', ov).onclick = () => { ov.remove(); artikelDialog(i.a); };
-  if (!i.a) $('#mAlsArtikel', ov).onclick = () => { ov.remove(); artikelDialog(null, { name: i.name, kategorie: i.p.kategorie, standardladen: i.p.laden }, i.p); };
+  if (!i.a) $('#mAlsArtikel', ov).onclick = () => { ov.remove(); artikelDialog(null, { name: i.name, kategorie: i.p.kategorie, standardladen: i.p.laden, im_vorrat: false }, i.p); };
 }
 
 function textListe(items) {
@@ -703,7 +706,7 @@ function hinzufuegenDialog() {
     const treffer = S.artikel.filter(a => !q || passtSuche(a.name + ' ' + (a.kategorie || ''), m)).sort((x, y) => coll.compare(x.name, y.name)).slice(0, q ? 30 : 0);
     const zus = frueher.filter(f => (!q || passtSuche(f.freitext + ' ' + (f.kategorie || ''), m)) && !S.pos.some(p => !p.artikel_id && p.freitext.toLowerCase() === f.freitext.toLowerCase()));
     let h = '';
-    for (const a of treffer) h += `<div class="result"><div class="main"><div class="name">${esc(a.name)}</div><div class="meta">${a.standardladen ? ladenPill(a.standardladen) : ''} ${esc(a.kategorie || '')}</div></div>
+    for (const a of treffer) h += `<div class="result"><div class="main"><div class="name">${esc(a.name)}</div><div class="meta">${a.standardladen ? ladenPill(a.standardladen) : ''} ${esc(a.kategorie || '')}${imVorrat(a) ? ' · ' + vorratText(a) : ' · <span class="tag grau">häufig gekauft</span>'}</div></div>
       ${aufListe.has(a.id) ? '<span class="tag">auf Liste</span>' : `<button class="btn small" data-art="${a.id}">+</button>`}</div>`;
     if (!q && zus.length) {
       h += `<div class="result"><h3 style="margin:0">Früher hinzugefügt</h3></div>`;
@@ -714,7 +717,7 @@ function hinzufuegenDialog() {
     }
     if (q && !S.artikel.some(a => a.name.toLowerCase() === q)) {
       h += `<div class="result"><div class="main"><div class="name">«${esc(inp.value.trim())}»</div><div class="meta">neu</div></div>
-        <button class="btn small" data-einmal>Nur diese Woche</button><button class="btn small primary" data-neuart>Als Vorratsartikel</button></div>`;
+        <button class="btn small" data-einmal>Nur diese Woche</button><button class="btn small primary" data-neuart>Als Artikel speichern</button></div>`;
     }
     erg.innerHTML = h || '<div class="empty">Tippe einen Namen ein. Früher hinzugefügte Zusatzartikel erscheinen hier.</div>';
     erg.querySelectorAll('[data-art]').forEach(b => b.onclick = async () => {
@@ -727,7 +730,7 @@ function hinzufuegenDialog() {
       zusatzDialog(f.freitext, f.kategorie, f.laden, zeige);
     });
     const e1 = $('[data-einmal]', erg); if (e1) e1.onclick = () => zusatzDialog(inp.value.trim(), null, null, () => { inp.value = ''; zeige(); });
-    const e2 = $('[data-neuart]', erg); if (e2) e2.onclick = () => { ov.remove(); artikelDialog(null, { name: inp.value.trim() }, null, true); };
+    const e2 = $('[data-neuart]', erg); if (e2) e2.onclick = () => { ov.remove(); artikelDialog(null, { name: inp.value.trim(), im_vorrat: false }, null, true); };
   }
   inp.oninput = zeige; zeige(); setTimeout(() => inp.focus(), 50);
 }
@@ -757,7 +760,7 @@ function zusatzDialog(name, kat, laden, danach) {
 function abschliessenDialog() {
   const { liste } = berechneListe();
   const gekauft = liste.filter(i => i.p && i.p.gekauft), offen = liste.length - gekauft.length;
-  const bestandBuchung = gekauft.filter(i => i.a && isNum(i.a.bestand));
+  const bestandBuchung = gekauft.filter(i => imVorrat(i.a) && isNum(i.a.bestand));
   const ov = dialog(`<h2>Einkauf abschliessen?</h2>
     <p>${gekauft.length} Artikel abgehakt${offen ? `, ${offen} nicht abgehakt` : ''}.</p>
     ${bestandBuchung.length ? `<p>Der Bestand von ${bestandBuchung.length} Vorratsartikel${bestandBuchung.length > 1 ? 'n' : ''} wird um die gekaufte Menge erhöht.</p>` : ''}
@@ -922,7 +925,7 @@ function aktionZeile(ak) {
     <div class="main"><div class="name">${esc(ak.name)}</div>
       <div class="meta">${esc((ak.beschreibung || '').replace(/,?\s*Angebot gilt nur.*$/i, ''))}${bis}</div>
       <div class="preis">${preis}</div>
-      ${a ? `<div class="meta">Dein Artikel: <b>${esc(a.name)}</b> · ${vorratText(a)}${oftGekauft(a) ? ' <span class="tag">kaufst du regelmässig</span>' : ''}</div>` : ''}
+      ${a ? `<div class="meta">Dein Artikel: <b>${esc(a.name)}</b>${imVorrat(a) ? ' · ' + vorratText(a) : ''}${oftGekauft(a) ? ' <span class="tag">kaufst du regelmässig</span>' : ''}</div>` : ''}
     </div>
     <div class="ak-box"><span class="ak-lbl">${p ? 'Auf der Einkaufsliste' : 'Auf die Einkaufsliste'}</span><div class="stepper ak-stepper${p ? ' aktiv' : ''}" title="Anzahl auf der Einkaufsliste"><button class="iconbtn" data-akd="-1" aria-label="Weniger" ${p ? '' : 'disabled'}>−</button><span>${menge}</span><button class="iconbtn" data-akd="1" aria-label="Mehr">+</button></div></div>
   </div>`;
@@ -965,8 +968,8 @@ function keinArtikelMerken(name) { try { const l = keinArtikelListe(); l.push(na
 // Aktion ohne passenden Vorratsartikel auf die Liste: fragen, ob ein Artikel angelegt werden soll (ausser früher schon «Nein»)
 function neuerArtikelFrage(ak) {
   const ov = dialog(`<h2>Neuer Artikel?</h2>
-    <p><b>${esc(ak.name)}</b> (${esc(ak.laden)}) ist noch nicht in deinem Vorrat.</p>
-    <p>Soll ich daraus einen Artikel machen? Dann kannst du Bestand, Routine und Standardladen festlegen, und die App erkennt ihn bei künftigen Aktionen.</p>
+    <p><b>${esc(ak.name)}</b> (${esc(ak.laden)}) ist noch nicht unter deinen Artikeln.</p>
+    <p>Soll ich daraus einen Artikel machen? Dann legst du fest, ob er im Vorrat erscheint oder nur über die Suche, und die App erkennt ihn bei künftigen Aktionen.</p>
     <div class="actions"><button class="btn" id="nfNein">Nein, nur auf die Liste</button><button class="btn primary" id="nfJa">Ja, Artikel anlegen</button></div>`);
   $('#nfNein', ov).onclick = async () => {
     ov.remove();
@@ -979,7 +982,7 @@ function neuerArtikelFrage(ak) {
     let p;
     try { p = await aktionAlsFreitext(ak); } catch (e) { fehler(e); render(); return; }
     render();
-    artikelDialog(null, { name: ak.name.replace(/\s*·\s*/g, ' '), kategorie: ak.kategorie, standardladen: ak.laden, laeden: [ak.laden], nur_aktion: false, mindestbestand: 0 }, p);
+    artikelDialog(null, { name: ak.name.replace(/\s*·\s*/g, ' '), kategorie: ak.kategorie, standardladen: ak.laden, laeden: [ak.laden], nur_aktion: false, mindestbestand: 0, im_vorrat: false }, p);
   };
 }
 
@@ -1021,7 +1024,7 @@ function aktualisiereZeile(row, a) {
 // Artikel unter dem Mindestbestand (nur im Vorrat angezeigt)
 function unterMinListe() {
   const liste = berechneListe().liste;
-  return S.artikel.filter(a => isNum(a.bestand) && isNum(a.mindestbestand) && a.bestand <= a.mindestbestand)
+  return S.artikel.filter(a => imVorrat(a) && isNum(a.bestand) && isNum(a.mindestbestand) && a.bestand <= a.mindestbestand)
     .sort((x, y) => coll.compare(x.name, y.name))
     .map(a => ({ a, aufListe: liste.some(i => i.a === a), fehlt: a.mindestbestand - a.bestand + 1 }));
 }
@@ -1070,13 +1073,21 @@ function renderArtikel(main) {
   const filter = admin ? FILTER : FILTER.filter(f => ['alle', 'unterMin', 'ohneBestand'].includes(f[0]));
   S.filter = 'alle';
   const sm = suchMuster(q);
-  const arts = S.artikel.filter(a => (!q || passtSuche(a.name + ' ' + (a.kategorie || '') + ' ' + (a.bemerkung || ''), sm)) && filterFn(S.filter)(a));
+  if (!admin) S.vListe = 'vorrat';
+  const haeufig = S.vListe === 'haeufig';
+  const nVorrat = S.artikel.filter(imVorrat).length, nHaeufig = S.artikel.length - nVorrat;
+  const arts = S.artikel.filter(a => imVorrat(a) !== haeufig && (!q || passtSuche(a.name + ' ' + (a.kategorie || '') + ' ' + (a.bemerkung || ''), sm)) && filterFn(S.filter)(a));
   const minZeigen = admin && store.get('einkauf-min-zeigen') !== 'nein';
-  let html = `<input class="search" id="aSuche" placeholder="Artikel suchen …" value="${esc(S.suche)}" autocomplete="off">
-    <p class="sum">${admin ? `Bestand${minZeigen ? ' und Minimum' : ''} mit − / + anpassen. Im orangen Feld setzt + den Artikel mit der gewünschten Anzahl auf die Einkaufsliste. Für alles andere auf den Namen tippen.
+  let html = (admin ? `<div class="chips" role="group" aria-label="Liste wählen">
+      <button class="chip" data-vl="vorrat" aria-pressed="${!haeufig}">Vorrat (${nVorrat})</button>
+      <button class="chip" data-vl="haeufig" aria-pressed="${haeufig}">Häufig gekauft (${nHaeufig})</button>
+      <button class="btn small" id="zuordnen" style="margin-left:auto">Zuordnen …</button></div>` : '')
+    + `<input class="search" id="aSuche" placeholder="${haeufig ? 'Häufig gekaufte Artikel suchen …' : 'Artikel suchen …'}" value="${esc(S.suche)}" autocomplete="off">
+    <p class="sum">${haeufig ? 'Diese Artikel haben keinen Bestand und erscheinen nicht im Vorrat. Du findest sie beim Zusammenstellen der Einkaufsliste über «+ Hinzufügen». Im orangen Feld kannst du sie auch hier direkt auf die Liste setzen.'
+      : admin ? `Bestand${minZeigen ? ' und Minimum' : ''} mit − / + anpassen. Im orangen Feld setzt + den Artikel mit der gewünschten Anzahl auf die Einkaufsliste. Für alles andere auf den Namen tippen.
       <button class="btn small" id="minUmschalten" style="margin-left:6px">${minZeigen ? 'Minimum ausblenden' : 'Minimum einblenden'}</button>` : 'Bestand mit − / + anpassen, wenn etwas aufgebraucht oder dazugekommen ist. Das wird sofort gespeichert.'}</p>`;
-  if (admin && !q) html += unterMinBlock();
-  if (!arts.length) html += `<div class="card"><div class="empty">Keine Artikel gefunden.</div></div>`;
+  if (admin && !q && !haeufig) html += unterMinBlock();
+  if (!arts.length) html += `<div class="card"><div class="empty">${haeufig && !q ? 'Noch keine häufig gekauften Artikel. Mit «Zuordnen …» nimmst du Artikel aus dem Vorrat heraus, oder lege mit «+ Neuer Artikel» einen an.' : 'Keine Artikel gefunden.'}</div></div>`;
   const g = gruppiere(arts.sort((x, y) => katSort(x.kategorie, y.kategorie) || coll.compare(x.name, y.name)), a => a.kategorie || OHNE_KAT);
   for (const [kat, as] of g) {
     html += `<h2>${esc(kat)} <span class="sum">${as.length}</span></h2><div class="card">`;
@@ -1086,8 +1097,8 @@ function renderArtikel(main) {
         <div class="main">${admin ? '<button class="linkish" data-edit>' : '<div>'}<div class="name">${esc(a.name)}</div>
           <div class="meta">${a.standardladen ? ladenPill(a.standardladen) : '<span class="tag warn">kein Standardladen</span>'}
           ${a.routine ? ` <span class="tag">Routine ${fmt(a.routine_menge)}/Wo</span>` : ''}${a.nur_aktion ? ' <span class="tag">nur Aktion</span>' : ''}
-          <span class="tag warn" data-unter ${unter ? '' : 'hidden'}>unter Minimum</span>${!minZeigen ? ` <span class="tag grau">Min ${fmt(a.mindestbestand)}</span>` : ''}</div>${admin ? '</button>' : '</div>'}</div>
-        <div class="zaehlerzeile">${zaehler(a, 'bestand', 'Bestand')}${minZeigen ? zaehler(a, 'mindestbestand', 'Min') : ''}${admin ? listenZaehler(a) : ''}</div>
+          ${haeufig ? '' : `<span class="tag warn" data-unter ${unter ? '' : 'hidden'}>unter Minimum</span>${!minZeigen ? ` <span class="tag grau">Min ${fmt(a.mindestbestand)}</span>` : ''}`}</div>${admin ? '</button>' : '</div>'}</div>
+        <div class="zaehlerzeile">${haeufig ? '' : zaehler(a, 'bestand', 'Bestand') + (minZeigen ? zaehler(a, 'mindestbestand', 'Min') : '')}${admin ? listenZaehler(a) : ''}</div>
       </div>`;
     }
     html += `</div>`;
@@ -1118,12 +1129,48 @@ function renderArtikel(main) {
   });
   main.querySelectorAll('[data-unterplus]').forEach(b => b.onclick = () => unterMinAufListe([artById(+b.dataset.unterplus)]));
   const alle = $('#unterAlle'); if (alle) alle.onclick = () => unterMinAufListe(unterMinListe().filter(x => !x.aufListe).map(x => x.a));
-  if (admin) { $('#neu').onclick = () => artikelDialog(null); $('#export').onclick = exportCsv; $('#minUmschalten').onclick = () => { store.set('einkauf-min-zeigen', minZeigen ? 'nein' : 'ja'); render(); }; }
+  main.querySelectorAll('[data-vl]').forEach(b => b.onclick = () => { S.vListe = b.dataset.vl; S.suche = ''; window.scrollTo(0, 0); render(); });
+  const zu = $('#zuordnen'); if (zu) zu.onclick = zuordnenDialog;
+  const mu = $('#minUmschalten');
+  if (admin) { $('#neu').onclick = () => artikelDialog(null, { im_vorrat: !haeufig }); $('#export').onclick = exportCsv; if (mu) mu.onclick = () => { store.set('einkauf-min-zeigen', minZeigen ? 'nein' : 'ja'); render(); }; }
+}
+
+/* Zuordnen: pro Artikel schnell festlegen, ob er im Vorrat erscheint oder nur über die Suche */
+function zuordnenDialog() {
+  const ov = dialog(`<h2>Vorrat oder häufig gekauft?</h2>
+    <p class="sum">Häkchen = erscheint im Vorrat (mit Bestand und Minimum). Ohne Häkchen = nur über die Suche beim Zusammenstellen der Einkaufsliste. Wird sofort gespeichert.</p>
+    <input class="search" id="zSuche" placeholder="Artikel suchen …" autocomplete="off">
+    <div class="chips"><button class="chip" data-zf="alle" aria-pressed="true">Alle</button><button class="chip" data-zf="v" aria-pressed="false">Nur Vorrat</button><button class="chip" data-zf="h" aria-pressed="false">Nur häufig gekauft</button></div>
+    <div id="zListe"></div>
+    <div class="actions"><button class="btn primary" data-close>Fertig</button></div>`);
+  let zf = 'alle';
+  const zeige = () => {
+    const m = suchMuster($('#zSuche', ov).value);
+    const arts = S.artikel.filter(a => passtSuche(a.name + ' ' + (a.kategorie || ''), m) && (zf === 'alle' || (zf === 'v') === imVorrat(a)))
+      .sort((x, y) => katSort(x.kategorie, y.kategorie) || coll.compare(x.name, y.name));
+    let h = arts.length ? '' : '<div class="card"><div class="empty">Keine Artikel gefunden.</div></div>';
+    for (const [kat, as] of gruppiere(arts, a => a.kategorie || OHNE_KAT)) {
+      h += `<h3>${esc(kat)}</h3><div class="card">${as.map(a => `<label class="row" style="cursor:pointer"><input type="checkbox" class="check" data-zid="${a.id}" ${imVorrat(a) ? 'checked' : ''}>
+        <div class="main"><div class="name">${esc(a.name)}</div><div class="meta" data-zmeta>${imVorrat(a) ? 'im Vorrat' : 'häufig gekauft (nur Suche)'}</div></div></label>`).join('')}</div>`;
+    }
+    $('#zListe', ov).innerHTML = h;
+    ov.querySelectorAll('[data-zid]').forEach(cb => cb.onchange = async () => {
+      const a = artById(+cb.dataset.zid), wert = cb.checked;
+      cb.closest('.row').querySelector('[data-zmeta]').textContent = wert ? 'im Vorrat' : 'häufig gekauft (nur Suche)';
+      try { Object.assign(a, await S.api.artikelAendern(a.id, { im_vorrat: wert })); }
+      catch (e) { cb.checked = !wert; fehler(e); }
+    });
+  };
+  $('#zSuche', ov).oninput = zeige;
+  ov.querySelectorAll('[data-zf]').forEach(b => b.onclick = () => { zf = b.dataset.zf; ov.querySelectorAll('[data-zf]').forEach(x => x.setAttribute('aria-pressed', x === b)); zeige(); });
+  // Beim Schliessen die Ansicht neu zeichnen
+  new MutationObserver((_, obs) => { if (!ov.isConnected) { obs.disconnect(); render(); } }).observe(document.body, { childList: true });
+  zeige();
 }
 
 /* Artikel anlegen / bearbeiten – alle Felder, damit die Tabelle vollständig bleibt */
 function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
-  const neu = !a; const v = Object.assign({ laeden: [], routine: null, nur_aktion: false, mindestbestand: 0 }, a || vorlage);
+  const neu = !a; const v = Object.assign({ laeden: [], routine: null, nur_aktion: false, mindestbestand: 0, im_vorrat: true }, a || vorlage);
   const ov = dialog(`<h2>${neu ? 'Neuer Artikel' : 'Artikel bearbeiten'}</h2>
     <form id="aForm" novalidate>
     <div class="field"><label for="fName">Name *</label><input type="text" id="fName" value="${esc(v.name || '')}" placeholder="z. B. M-Classic Thon"></div>
@@ -1131,6 +1178,10 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
     <div class="field"><div class="lbl">Erhältlich bei</div><div class="opts">${LAEDEN.map(l => `<label class="opt"><input type="checkbox" name="laeden" value="${esc(l)}" ${(v.laeden || []).includes(l) ? 'checked' : ''}>${esc(l)}</label>`).join('')}</div></div>
     <div class="field"><label for="fStd">Standardladen *</label><select id="fStd"><option value="">– wählen –</option>${LAEDEN.map(l => `<option ${l === v.standardladen ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
       <div class="hint">Dort landet der Artikel automatisch auf der Liste.</div></div>
+    <div class="field"><div class="lbl">Wo erscheint der Artikel?</div><div class="opts">
+      <label class="opt"><input type="radio" name="vorrat" value="ja" ${v.im_vorrat !== false ? 'checked' : ''}>Im Vorrat (mit Bestand)</label>
+      <label class="opt"><input type="radio" name="vorrat" value="nein" ${v.im_vorrat === false ? 'checked' : ''}>Häufig gekauft (nur Suche)</label></div>
+      <div class="hint">«Häufig gekauft» erscheint nicht im Vorrat, ist aber beim Zusammenstellen der Einkaufsliste über die Suche auffindbar.</div></div>
     <div class="field"><div class="lbl">Nur in Aktion kaufen?</div><div class="opts">
       <label class="opt"><input type="radio" name="aktion" value="nein" ${!v.nur_aktion ? 'checked' : ''}>Nein</label>
       <label class="opt"><input type="radio" name="aktion" value="ja" ${v.nur_aktion ? 'checked' : ''}>Ja</label></div></div>
@@ -1138,7 +1189,7 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
       <label class="opt"><input type="radio" name="routine" value="nein" ${v.routine === false ? 'checked' : ''}>Nein</label>
       <label class="opt"><input type="radio" name="routine" value="ja" ${v.routine === true ? 'checked' : ''}>Ja, jede Woche</label></div></div>
     <div class="field" id="fRmWrap"><label for="fRm">Routine-Menge pro Woche *</label><input type="number" id="fRm" min="1" step="1" inputmode="numeric" value="${fmt(v.routine_menge)}"></div>
-    <div class="two">
+    <div class="two" id="fBestWrap">
       <div class="field"><label for="fBest">Bestand aktuell</label><input type="number" id="fBest" min="0" step="any" inputmode="decimal" value="${fmt(v.bestand).replace(',', '.')}"></div>
       <div class="field"><label for="fMin">Mindestbestand</label><input type="number" id="fMin" min="0" step="any" inputmode="decimal" value="${fmt(v.mindestbestand).replace(',', '.')}"></div>
     </div>
@@ -1150,8 +1201,11 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
       <button type="button" class="btn" data-close>Abbrechen</button><button type="submit" class="btn primary" id="fOk">${neu ? 'Artikel anlegen' : 'Speichern'}</button>
     </div></form>`);
   const rmWrap = $('#fRmWrap', ov);
-  const sync = () => { rmWrap.style.display = ov.querySelector('input[name=routine]:checked')?.value === 'ja' ? '' : 'none'; };
-  ov.querySelectorAll('input[name=routine]').forEach(r => r.onchange = sync); sync();
+  const sync = () => {
+    rmWrap.style.display = ov.querySelector('input[name=routine]:checked')?.value === 'ja' ? '' : 'none';
+    $('#fBestWrap', ov).style.display = ov.querySelector('input[name=vorrat]:checked')?.value === 'nein' ? 'none' : '';
+  };
+  ov.querySelectorAll('input[name=routine], input[name=vorrat]').forEach(r => r.onchange = sync); sync();
   // Standardladen gilt automatisch als "erhältlich bei"
   $('#fStd', ov).onchange = e => { const cb = ov.querySelector(`input[name=laeden][value="${e.target.value}"]`); if (cb) cb.checked = true; };
 
@@ -1175,6 +1229,7 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
       nur_aktion: ov.querySelector('input[name=aktion]:checked').value === 'ja',
       routine: routineV === 'ja', routine_menge: routineV === 'ja' ? rm : null,
       bestand: best, mindestbestand: min, bemerkung: $('#fBem', ov).value.trim() || null,
+      im_vorrat: ov.querySelector('input[name=vorrat]:checked').value === 'ja',
     };
     $('#fOk', ov).disabled = true;
     try {
@@ -1207,11 +1262,11 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
 }
 
 function exportCsv() {
-  const kopf = ['Produkt', ...LAEDEN, 'Standardladen', 'Nur in Aktion', 'Routine', 'Routine-Menge / Woche', 'Bestand aktuell', 'Mindestbestand', 'Kategorie', 'Bemerkung'];
+  const kopf = ['Produkt', ...LAEDEN, 'Standardladen', 'Nur in Aktion', 'Routine', 'Routine-Menge / Woche', 'Bestand aktuell', 'Mindestbestand', 'Kategorie', 'Bemerkung', 'Im Vorrat'];
   const zelle = v => { const s = v === null || v === undefined ? '' : String(v); return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const zeilen = S.artikel.slice().sort((x, y) => katSort(x.kategorie, y.kategorie) || coll.compare(x.name, y.name)).map(a => [
     a.name, ...LAEDEN.map(l => (a.laeden || []).includes(l) ? 'x' : ''), a.standardladen, a.nur_aktion ? 'ja' : 'nein', a.routine ? 'ja' : 'nein',
-    a.routine_menge, fmt(a.bestand), fmt(a.mindestbestand), a.kategorie, a.bemerkung]);
+    a.routine_menge, fmt(a.bestand), fmt(a.mindestbestand), a.kategorie, a.bemerkung, imVorrat(a) ? 'ja' : 'nein']);
   const csv = '﻿' + [kopf, ...zeilen].map(r => r.map(zelle).join(';')).join('\r\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   const link = document.createElement('a');
@@ -1305,7 +1360,7 @@ async function startMitSitzung(session) {
 }
 
 /* Menü oben rechts */
-const APP_VERSION = '2026-11-16d';
+const APP_VERSION = '2026-11-17a';
 function menue() {
   const admin = S.profil && S.profil.rolle === 'admin';
   const ov = dialog(`<h2>Menü</h2>
