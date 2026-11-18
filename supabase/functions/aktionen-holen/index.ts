@@ -20,6 +20,7 @@ const antwort = (obj: unknown, status = 200) =>
 type Angebot = {
   quelle_id: string; name: string; beschreibung?: string | null; preis?: number | null; preis_alt?: number | null;
   rabatt?: string | null; bild_url?: string | null; kategorie?: string | null; gueltig_von?: string | null; gueltig_bis?: string | null;
+  marke?: string | null;   // Migros: Marke, damit die App Aktionen einer Marke bündeln kann
 };
 
 async function holen(url: string): Promise<string> {
@@ -284,6 +285,7 @@ async function migrosDirekt(): Promise<Angebot[]> {
       kategorie: k.breadcrumb?.[0]?.name || null,
       gueltig_von: o.promotionDateRange.startDate || null,
       gueltig_bis: o.promotionDateRange.endDate || null,
+      marke: k.brand ? String(k.brand).trim() : null,
     });
   }
   return angebote;

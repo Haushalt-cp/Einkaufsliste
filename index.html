@@ -139,6 +139,18 @@
   .preis { font-weight: 700; margin-top: 2px; }
   .preis .alt { font-weight: 400; color: var(--muted); font-size: 13px; text-decoration: line-through; }
   .aktionrow.auf { background: #fff6f4; }
+  /* Migros: Aktionen einer Marke gebündelt (wie in der Migros-App) */
+  .akgruppe { border-top: 1px solid var(--line); }
+  .card > .akgruppe:first-child, .rows > .akgruppe:first-child { border-top: 0; }
+  .akgruppe > summary { list-style: none; cursor: pointer; }
+  .akgruppe > summary::-webkit-details-marker { display: none; }
+  .akgruppe > summary .row { border-top: 0; }
+  .akgruppe .gr-rabatt { font-size: 15px; padding: 3px 9px; }
+  .akgruppe .chev { color: var(--muted); font-size: 20px; transition: transform .15s; padding: 0 4px; }
+  .akgruppe[open] .chev { transform: rotate(90deg); }
+  .akgruppe[open] > summary .row { background: #fbf4f2; }
+  .akgruppe > .gr-varianten { border-left: 3px solid #f0c9c5; margin-left: 12px; }
+  .akgruppe > .gr-varianten > .row:first-child { border-top: 1px solid var(--line); }
   .result { padding: 8px 12px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
   .result:first-child { border-top: 0; }
   .result .main { flex: 1; }
@@ -237,7 +249,7 @@ function restApi(tokenHolen) {
     aktionen: async () => {
       const heute = new Date().toISOString().slice(0, 10), alle = [];
       for (let von = 0; von < 20000; von += 1000) {
-        const teil = await call('GET', `aktion_aktuell?select=id,laden,name,beschreibung,preis,preis_alt,rabatt,kategorie,gueltig_von,gueltig_bis,abgerufen_am&or=(gueltig_bis.is.null,gueltig_bis.gte.${heute})&order=laden.asc,id.asc&limit=1000&offset=${von}`);
+        const teil = await call('GET', `aktion_aktuell?select=id,laden,name,beschreibung,preis,preis_alt,rabatt,kategorie,gueltig_von,gueltig_bis,abgerufen_am,marke&or=(gueltig_bis.is.null,gueltig_bis.gte.${heute})&order=laden.asc,id.asc&limit=1000&offset=${von}`);
         alle.push(...(teil || []));
         if (!teil || teil.length < 1000) break;
       }
@@ -291,7 +303,10 @@ function demoApi() {
       { id: 501, laden: 'Denner', name: 'Barilla Spaghetti n. 5', beschreibung: '500 g', preis: 1.95, preis_alt: 2.95, rabatt: '33%', kategorie: 'Vorräte', gueltig_von: '2026-11-19', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
       { id: 502, laden: 'Denner', name: 'Broccoli', beschreibung: 'Spanien, per kg', preis: 2.5, preis_alt: 4, rabatt: '37%', kategorie: 'Früchte und Gemüse', gueltig_von: '2026-11-19', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
       { id: 503, laden: 'Migros', name: 'M-Classic gehackte Tomaten, 3 x 280 g', beschreibung: 'Angebot gilt nur vom 18.11. bis 24.11.2026', preis: 2.4, preis_alt: 3.6, rabatt: '33%', kategorie: 'Pasta, Würzmittel & Konserven', gueltig_von: '2026-11-18', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
-      { id: 505, laden: 'Migros', name: 'Frey Schokolade Milch, 5 x 100 g', beschreibung: '5 x 100 g', preis: 6.5, preis_alt: 10.5, rabatt: '38%', kategorie: 'Süsses', gueltig_von: '2026-11-12', gueltig_bis: '2026-11-25', abgerufen_am: new Date().toISOString() },
+      { id: 507, laden: 'Migros', marke: 'Blévita', name: 'Blévita · Gruyère AOP', beschreibung: '228g', preis: 3.4, preis_alt: 4, rabatt: '–.60 · Ab 2 Stück', kategorie: 'Snacks & Süssigkeiten', gueltig_von: '2026-11-19', gueltig_bis: '2026-11-25', abgerufen_am: new Date().toISOString() },
+      { id: 508, laden: 'Migros', marke: 'Blévita', name: 'Blévita · Sesam · vegan', beschreibung: '295g', preis: 3.5, preis_alt: 4.1, rabatt: '–.60 · Ab 2 Stück', kategorie: 'Snacks & Süssigkeiten', gueltig_von: '2026-11-19', gueltig_bis: '2026-11-25', abgerufen_am: new Date().toISOString() },
+      { id: 509, laden: 'Migros', marke: 'Blévita', name: 'Blévita · Chia-Randen · vegan, laktosefrei', beschreibung: '6 x 38g', preis: 3.5, preis_alt: 4.1, rabatt: '–.60 · Ab 2 Stück', kategorie: 'Snacks & Süssigkeiten', gueltig_von: '2026-11-19', gueltig_bis: '2026-11-25', abgerufen_am: new Date().toISOString() },
+      { id: 505, laden: 'Migros', marke: 'Frey', name: 'Frey Schokolade Milch, 5 x 100 g', beschreibung: '5 x 100 g', preis: 6.5, preis_alt: 10.5, rabatt: '38%', kategorie: 'Süsses', gueltig_von: '2026-11-12', gueltig_bis: '2026-11-25', abgerufen_am: new Date().toISOString() },
       { id: 506, laden: 'Lidl', name: 'Rispentomaten', beschreibung: '500 g', preis: 1.49, preis_alt: 2.29, rabatt: '-34%', kategorie: 'Gemüse', gueltig_von: '2026-11-19', gueltig_bis: null, abgerufen_am: new Date().toISOString() },
       { id: 504, laden: 'Migros', name: 'Blumenkohl', beschreibung: 'Schweiz, per Stück', preis: 2.95, preis_alt: 4.2, rabatt: '30%', kategorie: 'Früchte & Gemüse', gueltig_von: '2026-11-18', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
     ]),
@@ -309,7 +324,7 @@ function demoApi() {
 /* ---------- Zustand ---------- */
 const S = {
   api: null, artikel: [], einkauf: null, pos: [], frueher: [],
-  tab: 'einkaufen', vListe: 'vorrat', suche: '', filter: 'alle', laden: 'alle', ekLaden: 'alle', ekSuche: '', aktionen: [], akLaden: 'Denner', akWoche: 0, akSuche: '', akFilter: 'alle',
+  tab: 'einkaufen', vListe: 'vorrat', suche: '', filter: 'alle', laden: 'alle', ekLaden: 'alle', ekSuche: '', aktionen: [], akLaden: 'Denner', akWoche: 0, akSuche: '', akFilter: 'alle', akOffen: new Set(),
 };
 const posFor = id => S.pos.find(p => p.artikel_id === id);
 const artById = id => S.artikel.find(a => a.id === id);
@@ -896,11 +911,14 @@ function renderAktionen(main) {
       <button class="btn small" id="akNeu" style="margin-left:6px">Jetzt aktualisieren</button></p>`;
   if (!liste.length) html += `<div class="card"><div class="empty">Keine Aktionen gefunden.</div></div>`;
   // Passende zuerst, dann nach Kategorie
-  const meine = liste.filter(x => passenderArtikel(x)), rest = liste.filter(x => !passenderArtikel(x));
+  // Passt eine Variante einer Migros-Gruppe, kommt die ganze Gruppe nach oben
+  const passendeGruppen = new Set(liste.filter(x => passenderArtikel(x)).map(akGruppenSchluessel).filter(Boolean));
+  const passt = x => !!passenderArtikel(x) || passendeGruppen.has(akGruppenSchluessel(x));
+  const meine = liste.filter(passt), rest = liste.filter(x => !passt(x));
   const block = (titel, items) => {
     if (!items.length) return '';
     let h = `<h2>${esc(titel)} <span class="sum">${items.length}</span></h2><div class="card">`;
-    for (const ak of items) h += aktionZeile(ak);
+    h += aktionZeilen(items);
     return h + '</div>';
   };
   if (q) {
@@ -916,12 +934,12 @@ function renderAktionen(main) {
     if (restLauf.length) {
       const offen = !restNeu.length ? ' open' : '';
       html += `<h2>Laufende Aktionen <span class="sum">${restLauf.length}</span></h2>
-        <details class="card"${offen}><summary>Schon früher gestartet, am ${esc(datumLang(tag))} noch gültig</summary><div class="rows">${sortiert(restLauf).map(aktionZeile).join('')}</div></details>`;
+        <details class="card"${offen}><summary>Schon früher gestartet, am ${esc(datumLang(tag))} noch gültig</summary><div class="rows">${aktionZeilen(sortiert(restLauf))}</div></details>`;
     }
   }
   if (!q && S.akFilter === 'alle' && w.ohneDatum.length) {
     html += `<h2>Weitere ${esc(S.akLaden)}-Aktionen <span class="sum">${w.ohneDatum.length}</span></h2>
-      <details class="card"><summary>Ohne Datumsangabe – Gültigkeit im Laden prüfen</summary><div class="rows">${w.ohneDatum.sort((x, y) => coll.compare(x.name, y.name)).map(aktionZeile).join('')}</div></details>`;
+      <details class="card"><summary>Ohne Datumsangabe – Gültigkeit im Laden prüfen</summary><div class="rows">${aktionZeilen(w.ohneDatum.sort((x, y) => coll.compare(x.name, y.name)))}</div></details>`;
   }
   html += `<p class="sum" style="margin-top:14px">Quellen: Migros von migros.ch (Region Aare), Denner von denner.ch, Lidl von lidl.ch. Verfügbarkeit im Laden kann abweichen.</p>`;
   main.innerHTML = html;
@@ -937,12 +955,43 @@ function renderAktionen(main) {
     catch (e) { fehler(e); }
     render();
   };
+  main.querySelectorAll('details.akgruppe').forEach(d => d.ontoggle = () => { if (d.open) S.akOffen.add(d.dataset.gk); else S.akOffen.delete(d.dataset.gk); });
   main.querySelectorAll('.row[data-ak]').forEach(row => {
     const ak = S.aktionen.find(x => x.id === +row.dataset.ak);
     row.querySelectorAll('[data-akd]').forEach(b => b.onclick = () => aktionMenge(ak, Number(b.dataset.akd)));
   });
 }
 
+// Migros bündelt Aktionen einer Marke («Blévita ganzes Sortiment»). Die Schnittstelle liefert keine Aktions-Nummer,
+// darum: gleiche Marke + gleicher Rabatt + gleiche Gültigkeit + gleiche Kategorie = eine Gruppe.
+const akGruppenSchluessel = x => x.laden === 'Migros' && x.marke
+  ? [x.laden, x.marke, x.rabatt || '', x.gueltig_von || '', x.gueltig_bis || '', x.kategorie || ''].join('|') : null;
+function aktionZeilen(items) {
+  const gruppen = new Map();
+  for (const x of items) { const k = akGruppenSchluessel(x) || 'einzeln|' + x.id; if (!gruppen.has(k)) gruppen.set(k, []); gruppen.get(k).push(x); }
+  let h = '';
+  for (const [k, its] of gruppen) h += its.length > 1 ? aktionGruppe(k, its) : aktionZeile(its[0]);
+  return h;
+}
+function aktionGruppe(k, its) {
+  const erste = its[0];
+  const aufListe = its.filter(x => aktionPosition(x)).length;
+  const passend = [...new Set(its.map(passenderArtikel).filter(Boolean))];
+  // Beim Suchen sind nur Treffer in der Gruppe: dann gleich aufgeklappt
+  const offen = S.akOffen.has(k) || !!S.akSuche.trim();
+  const rabatt = erste.rabatt ? `<span class="tag aktion gr-rabatt">${esc(erste.rabatt)}</span>` : '';
+  return `<details class="akgruppe" data-gk="${esc(k)}"${offen ? ' open' : ''}>
+    <summary><div class="row aktionrow${aufListe ? ' auf' : ''}">
+      <div class="main"><div class="name">${esc(erste.marke)}</div>
+        <div class="preis">${rabatt}</div>
+        <div class="meta">${its.length} Varianten${S.akSuche.trim() ? ' · ' + esc(erste.laden) : ''}${aufListe ? ` · <span class="tag aktion">${aufListe} auf der Liste</span>` : ''}</div>
+        ${passend.length ? `<div class="meta">Dein Artikel: <b>${passend.map(a => esc(a.name)).join(', ')}</b></div>` : ''}
+      </div>
+      <span class="chev" aria-hidden="true">›</span>
+    </div></summary>
+    <div class="gr-varianten">${its.map(aktionZeile).join('')}</div>
+  </details>`;
+}
 function aktionZeile(ak) {
   const a = passenderArtikel(ak), p = aktionPosition(ak);
   const menge = p ? (p.menge_fix || 1) : 0;
