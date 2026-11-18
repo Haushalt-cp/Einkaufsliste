@@ -273,7 +273,9 @@ async function migrosDirekt(): Promise<Angebot[]> {
     if (!mitAktion(k)) continue;
     const o = k.offer;
     const titel = String(k.title || [k.brand, k.name, k.versioning].filter(Boolean).join(" · "));
-    const badge = (o.badges || []).map((b: Record<string, string>) => b.description).filter(Boolean).join(" · ");
+    // «Vitamin-Franken» (Früchte/Gemüse für 1.–, nur im Laden) sonst nur als «1.–» erkennbar
+    const badge = (o.badges || []).map((b: Record<string, string>) =>
+      b.type === "VITAMIN_FRANC_PROMOTION" && b.description ? `Vitamin-Franken ${b.description}` : b.description).filter(Boolean).join(" · ");
     angebote.push({
       quelle_id: String(k.uid),
       name: titel.replace(/\s*·\s*/g, " · "),

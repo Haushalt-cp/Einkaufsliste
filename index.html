@@ -368,7 +368,10 @@ function dennerKategorie(kat, name) {
   return k ? 'Sonstiges' : 'Andere';
 }
 const katAuswahl = (id, wert) => { const w = wert ? dennerKategorie(wert) : ''; return `<select id="${id}"><option value="">– wählen –</option>${KATEGORIEN.map(k => `<option ${k === w ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select>`; };
-const aktionenNormalisiert = liste => liste.map(x => ({ ...x, kategorie: dennerKategorie(x.kategorie, x.name) }));
+// Tierbedarf (Futter, Streu usw.) gehört nie in die Aktionen
+const TIERBEDARF = /tierbedarf|tiernahrung|tierfutter|haustier|katzen|hunde/i;
+const aktionenNormalisiert = liste => liste.filter(x => !TIERBEDARF.test(x.kategorie || ''))
+  .map(x => ({ ...x, kategorie: dennerKategorie(x.kategorie, x.name) }));
 
 /* ---------- Einkaufslogik ---------- */
 // Drei Listen: Vorrat (mit Bestand), Häufig gekauft und Sonstige (beide ohne Bestand, nur über die Suche)
@@ -912,7 +915,8 @@ function renderAktionen(main) {
   if (!liste.length) html += `<div class="card"><div class="empty">Keine Aktionen gefunden.</div></div>`;
   // Passende zuerst, dann nach Kategorie
   // Passt eine Variante einer Migros-Gruppe, kommt die ganze Gruppe nach oben
-  const passendeGruppen = new Set(liste.filter(x => passenderArtikel(x)).map(akGruppenSchluessel).filter(Boolean));
+  const gZahl = new Map(); liste.forEach(x => { const k = akGruppenSchluessel(x); if (k) gZahl.set(k, (gZahl.get(k) || 0) + 1); });
+  const passendeGruppen = new Set(liste.filter(x => passenderArtikel(x)).map(akGruppenSchluessel).filter(k => k && gZahl.get(k) >= GRUPPE_AB));
   const passt = x => !!passenderArtikel(x) || passendeGruppen.has(akGruppenSchluessel(x));
   const meine = liste.filter(passt), rest = liste.filter(x => !passt(x));
   const block = (titel, items) => {
@@ -963,19 +967,34 @@ function renderAktionen(main) {
 }
 
 // Migros bündelt Aktionen einer Marke («Blévita ganzes Sortiment»). Die Schnittstelle liefert keine Aktions-Nummer,
-// darum: gleiche Marke + gleicher Rabatt + gleiche Gültigkeit + gleiche Kategorie = eine Gruppe.
+// darum: gleiche Marke + gleicher Rabatt + gleiche Gültigkeit + gleiche Kategorie = eine Gruppe (ab 3 Produkten).
 // «Migros», «M-Classic» usw. sind Produktbezeichnungen, keine Sortiments-Aktionen: nicht bündeln.
-// Ebenso «Hit» (einzelner Preishit) und «20x · Neu» (Cumulus-Punkte auf Neuheiten).
+// «Hit» ist ein einzelner Preishit: nicht bündeln (ausser bei Marken, die immer gebündelt werden).
 const NICHT_BUENDELN = new Set(['migros', 'm-classic', 'm-budget', 'migros bio']);
-const buendelbar = x => x.laden === 'Migros' && x.marke && !NICHT_BUENDELN.has(x.marke.trim().toLowerCase())
-  && !/^(hit\b|\d+x\b)/i.test((x.rabatt || '').trim());
-const akGruppenSchluessel = x => buendelbar(x)
-  ? [x.laden, x.marke, x.rabatt || '', x.gueltig_von || '', x.gueltig_bis || '', x.kategorie || ''].join('|') : null;
+const IMMER_BUENDELN = new Set(['migros kids & co.']);
+const GRUPPE_AB = 3;
+const markeKlein = x => (x.marke || '').trim().toLowerCase();
+function akGruppenSchluessel(x) {
+  if (x.laden !== 'Migros' || !x.marke || NICHT_BUENDELN.has(markeKlein(x))) return null;
+  if (IMMER_BUENDELN.has(markeKlein(x))) return [x.laden, x.marke, x.gueltig_von || '', x.gueltig_bis || ''].join('|');
+  if (/^hit\b/i.test((x.rabatt || '').trim())) return null;
+  return [x.laden, x.marke, x.rabatt || '', x.gueltig_von || '', x.gueltig_bis || '', x.kategorie || ''].join('|');
+}
+// Gruppenname: Marke + gemeinsamer Produktteil («Emmi Yogi Drink», «Rexona Deo»); sonst die Produktarten («Axe Deo, Duschgel»)
+function gruppenName(its) {
+  const marke = its[0].marke;
+  const teile = its.map(x => { const t = String(x.name || '').split(' · '); return (t.length > 1 ? t[1] : '').trim().split(/\s+/).filter(Boolean); });
+  const gemeinsam = [];
+  for (let i = 0; teile.every(t => t.length > i) && teile.every(t => t[i].toLowerCase() === teile[0][i].toLowerCase()); i++) gemeinsam.push(teile[0][i]);
+  if (gemeinsam.length) return `${marke} ${gemeinsam.join(' ')}`;
+  const arten = [...new Set(teile.map(t => t[0]).filter(Boolean))];
+  return arten.length && arten.length <= 3 ? `${marke} ${arten.join(', ')}` : marke;
+}
 function aktionZeilen(items) {
   const gruppen = new Map();
   for (const x of items) { const k = akGruppenSchluessel(x) || 'einzeln|' + x.id; if (!gruppen.has(k)) gruppen.set(k, []); gruppen.get(k).push(x); }
   let h = '';
-  for (const [k, its] of gruppen) h += its.length > 1 ? aktionGruppe(k, its) : aktionZeile(its[0]);
+  for (const [k, its] of gruppen) h += its.length >= GRUPPE_AB ? aktionGruppe(k, its) : its.map(aktionZeile).join('');
   return h;
 }
 function aktionGruppe(k, its) {
@@ -984,10 +1003,11 @@ function aktionGruppe(k, its) {
   const passend = [...new Set(its.map(passenderArtikel).filter(Boolean))];
   // Beim Suchen sind nur Treffer in der Gruppe: dann gleich aufgeklappt
   const offen = S.akOffen.has(k) || !!S.akSuche.trim();
-  const rabatt = erste.rabatt ? `<span class="tag aktion gr-rabatt">${esc(erste.rabatt)}</span>` : '';
+  const rabatte = [...new Set(its.map(x => x.rabatt).filter(Boolean))];
+  const rabatt = rabatte.length === 1 ? `<span class="tag aktion gr-rabatt">${esc(rabatte[0])}</span>` : '';
   return `<details class="akgruppe" data-gk="${esc(k)}"${offen ? ' open' : ''}>
     <summary><div class="row aktionrow${aufListe ? ' auf' : ''}">
-      <div class="main"><div class="name">${esc(erste.marke)}</div>
+      <div class="main"><div class="name">${esc(gruppenName(its))}</div>
         <div class="preis">${rabatt}</div>
         <div class="meta">${its.length} Varianten${S.akSuche.trim() ? ' · ' + esc(erste.laden) : ''}${aufListe ? ` · <span class="tag aktion">${aufListe} auf der Liste</span>` : ''}</div>
         ${passend.length ? `<div class="meta">Dein Artikel: <b>${passend.map(a => esc(a.name)).join(', ')}</b></div>` : ''}
