@@ -306,6 +306,9 @@ function demoApi() {
       { id: 507, laden: 'Migros', marke: 'Blévita', name: 'Blévita · Gruyère AOP', beschreibung: '228g', preis: 3.4, preis_alt: 4, rabatt: '–.60 · Ab 2 Stück', kategorie: 'Snacks & Süssigkeiten', gueltig_von: '2026-11-19', gueltig_bis: '2026-11-25', abgerufen_am: new Date().toISOString() },
       { id: 508, laden: 'Migros', marke: 'Blévita', name: 'Blévita · Sesam · vegan', beschreibung: '295g', preis: 3.5, preis_alt: 4.1, rabatt: '–.60 · Ab 2 Stück', kategorie: 'Snacks & Süssigkeiten', gueltig_von: '2026-11-19', gueltig_bis: '2026-11-25', abgerufen_am: new Date().toISOString() },
       { id: 509, laden: 'Migros', marke: 'Blévita', name: 'Blévita · Chia-Randen · vegan, laktosefrei', beschreibung: '6 x 38g', preis: 3.5, preis_alt: 4.1, rabatt: '–.60 · Ab 2 Stück', kategorie: 'Snacks & Süssigkeiten', gueltig_von: '2026-11-19', gueltig_bis: '2026-11-25', abgerufen_am: new Date().toISOString() },
+      { id: 600, laden: 'Migros', marke: 'Axe', name: 'Axe · Deo Stick Cherry Fizz', beschreibung: '150ml', preis: 6.95, preis_alt: 6.95, rabatt: '20x · Neu', kategorie: 'Beauty & Gesundheit', gueltig_von: '2026-11-19', gueltig_bis: '2026-12-02', abgerufen_am: new Date().toISOString() },
+      { id: 601, laden: 'Migros', marke: 'Axe', name: 'Axe · Deo Bodyspray Nr. 10', beschreibung: '150ml', preis: 6.95, preis_alt: 6.95, rabatt: '20x · Neu', kategorie: 'Beauty & Gesundheit', gueltig_von: '2026-11-19', gueltig_bis: '2026-12-02', abgerufen_am: new Date().toISOString() },
+      { id: 602, laden: 'Migros', marke: 'Axe', name: 'Axe · Duschgel · Blue Lavender XL', beschreibung: '150ml', preis: 6.95, preis_alt: 6.95, rabatt: '20x · Neu', kategorie: 'Beauty & Gesundheit', gueltig_von: '2026-11-19', gueltig_bis: '2026-12-02', abgerufen_am: new Date().toISOString() },
       { id: 505, laden: 'Migros', marke: 'Frey', name: 'Frey Schokolade Milch, 5 x 100 g', beschreibung: '5 x 100 g', preis: 6.5, preis_alt: 10.5, rabatt: '38%', kategorie: 'Süsses', gueltig_von: '2026-11-12', gueltig_bis: '2026-11-25', abgerufen_am: new Date().toISOString() },
       { id: 506, laden: 'Lidl', name: 'Rispentomaten', beschreibung: '500 g', preis: 1.49, preis_alt: 2.29, rabatt: '-34%', kategorie: 'Gemüse', gueltig_von: '2026-11-19', gueltig_bis: null, abgerufen_am: new Date().toISOString() },
       { id: 504, laden: 'Migros', name: 'Blumenkohl', beschreibung: 'Schweiz, per Stück', preis: 2.95, preis_alt: 4.2, rabatt: '30%', kategorie: 'Früchte & Gemüse', gueltig_von: '2026-11-18', gueltig_bis: '2026-11-24', abgerufen_am: new Date().toISOString() },
@@ -915,6 +918,9 @@ function renderAktionen(main) {
   if (!liste.length) html += `<div class="card"><div class="empty">Keine Aktionen gefunden.</div></div>`;
   // Passende zuerst, dann nach Kategorie
   // Passt eine Variante einer Migros-Gruppe, kommt die ganze Gruppe nach oben
+  // Neuheiten (z. B. «20x · Neu» = Cumulus-Punkte, kein Rabatt) nicht bei den Aktionen, sondern separat ganz unten
+  const neuheiten = q ? [] : liste.filter(istNeuheit);
+  if (!q) liste = liste.filter(x => !istNeuheit(x));
   const gZahl = new Map(); liste.forEach(x => { const k = akGruppenSchluessel(x); if (k) gZahl.set(k, (gZahl.get(k) || 0) + 1); });
   const passendeGruppen = new Set(liste.filter(x => passenderArtikel(x)).map(akGruppenSchluessel).filter(k => k && gZahl.get(k) >= GRUPPE_AB));
   const passt = x => !!passenderArtikel(x) || passendeGruppen.has(akGruppenSchluessel(x));
@@ -945,6 +951,10 @@ function renderAktionen(main) {
     html += `<h2>Weitere ${esc(S.akLaden)}-Aktionen <span class="sum">${w.ohneDatum.length}</span></h2>
       <details class="card"><summary>Ohne Datumsangabe – Gültigkeit im Laden prüfen</summary><div class="rows">${aktionZeilen(w.ohneDatum.sort((x, y) => coll.compare(x.name, y.name)))}</div></details>`;
   }
+  if (neuheiten.length) {
+    html += `<h2>Neuheiten <span class="sum">${neuheiten.length}</span></h2>
+      <details class="card"><summary>Neue Produkte mit Extra-Punkten – kein Preisrabatt</summary><div class="rows">${aktionZeilen(neuheiten.sort((x, y) => coll.compare(x.name, y.name)))}</div></details>`;
+  }
   html += `<p class="sum" style="margin-top:14px">Quellen: Migros von migros.ch (Region Aare), Denner von denner.ch, Lidl von lidl.ch. Verfügbarkeit im Laden kann abweichen.</p>`;
   main.innerHTML = html;
 
@@ -970,6 +980,7 @@ function renderAktionen(main) {
 // darum: gleiche Marke + gleicher Rabatt + gleiche Gültigkeit + gleiche Kategorie = eine Gruppe (ab 3 Produkten).
 // «Migros», «M-Classic» usw. sind Produktbezeichnungen, keine Sortiments-Aktionen: nicht bündeln.
 // «Hit» ist ein einzelner Preishit: nicht bündeln (ausser bei Marken, die immer gebündelt werden).
+const istNeuheit = x => /\bneu\b/i.test(x.rabatt || '');
 const NICHT_BUENDELN = new Set(['migros', 'm-classic', 'm-budget', 'migros bio']);
 const IMMER_BUENDELN = new Set(['migros kids & co.']);
 const GRUPPE_AB = 3;
@@ -1004,7 +1015,7 @@ function aktionGruppe(k, its) {
   // Beim Suchen sind nur Treffer in der Gruppe: dann gleich aufgeklappt
   const offen = S.akOffen.has(k) || !!S.akSuche.trim();
   const rabatte = [...new Set(its.map(x => x.rabatt).filter(Boolean))];
-  const rabatt = rabatte.length === 1 ? `<span class="tag aktion gr-rabatt">${esc(rabatte[0])}</span>` : '';
+  const rabatt = rabatte.length === 1 ? `<span class="tag ${istNeuheit(erste) ? 'grau' : 'aktion'} gr-rabatt">${esc(rabatte[0])}</span>` : '';
   return `<details class="akgruppe" data-gk="${esc(k)}"${offen ? ' open' : ''}>
     <summary><div class="row aktionrow${aufListe ? ' auf' : ''}">
       <div class="main"><div class="name">${esc(gruppenName(its))}</div>
@@ -1020,7 +1031,7 @@ function aktionGruppe(k, its) {
 function aktionZeile(ak) {
   const a = passenderArtikel(ak), p = aktionPosition(ak);
   const menge = p ? (p.menge_fix || 1) : 0;
-  const preis = `${chf(ak.preis)}${ak.preis_alt ? ` <span class="alt">statt ${chf(ak.preis_alt)}</span>` : ''}${ak.rabatt ? ` <span class="tag aktion">${esc(ak.rabatt)}</span>` : ''}`;
+  const preis = `${chf(ak.preis)}${ak.preis_alt && (!isNum(ak.preis) || ak.preis_alt > ak.preis) ? ` <span class="alt">statt ${chf(ak.preis_alt)}</span>` : ''}${ak.rabatt ? ` <span class="tag ${istNeuheit(ak) ? 'grau' : 'aktion'}">${esc(ak.rabatt)}</span>` : ''}`;
   const bis = S.akSuche.trim() ? ` · ${esc(ak.laden)}` : '';
   return `<div class="row aktionrow${p ? ' auf' : ''}" data-ak="${ak.id}">
     <div class="main"><div class="name">${esc(ak.name)}</div>
