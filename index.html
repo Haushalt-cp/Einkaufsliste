@@ -233,7 +233,16 @@ function restApi(tokenHolen) {
     benutzer: () => call('GET', 'benutzer?select=*&order=erstellt_am.asc'),
     benutzerRolle: (id, rolle) => call('PATCH', 'benutzer?id=eq.' + id, { rolle }, 'return=representation').then(r => r[0]),
     benutzerLoeschen: id => call('DELETE', 'benutzer?id=eq.' + id),
-    aktionen: () => call('GET', 'aktion_aktuell?select=*&order=laden.asc,name.asc'),
+    // Aktionen seitenweise laden (die Datenbank liefert höchstens 1000 Zeilen pro Abfrage); abgelaufene weglassen
+    aktionen: async () => {
+      const heute = new Date().toISOString().slice(0, 10), alle = [];
+      for (let von = 0; von < 20000; von += 1000) {
+        const teil = await call('GET', `aktion_aktuell?select=id,laden,name,beschreibung,preis,preis_alt,rabatt,kategorie,gueltig_von,gueltig_bis,abgerufen_am&or=(gueltig_bis.is.null,gueltig_bis.gte.${heute})&order=laden.asc,id.asc&limit=1000&offset=${von}`);
+        alle.push(...(teil || []));
+        if (!teil || teil.length < 1000) break;
+      }
+      return alle;
+    },
     verlauf: () => call('GET', 'einkauf_position?select=artikel_id,freitext,kategorie,laden,menge_fix,menge_gekauft,einkauf_id,einkauf!inner(abgeschlossen_am)&gekauft=is.true&einkauf.abgeschlossen_am=not.is.null&order=id.desc&limit=3000'),
     aktionenAktualisieren: async () => {
       const token = await tokenHolen();
@@ -923,7 +932,7 @@ function renderAktionen(main) {
   const s = $('#akSuche');
   s.oninput = () => { S.akSuche = s.value; const pos = s.selectionStart; render(); const n = $('#akSuche'); n.focus(); n.setSelectionRange(pos, pos); };
   $('#akNeu').onclick = async () => {
-    const b = $('#akNeu'); b.disabled = true; b.textContent = 'Lädt … (ca. 30 s)';
+    const b = $('#akNeu'); b.disabled = true; b.textContent = 'Lädt … (ca. 1 Min.)';
     try { await S.api.aktionenAktualisieren(); S.aktionen = aktionenNormalisiert(await S.api.aktionen()); toast('Aktionen aktualisiert.'); }
     catch (e) { fehler(e); }
     render();
@@ -1322,7 +1331,7 @@ async function laden() {
     const [artikel, einkaufAlt, frueher] = await Promise.all([S.api.artikel(), S.api.offenerEinkauf(), S.api.fruehereZusatz()]);
     S.artikel = artikel; S.frueher = frueher || [];
     if (S.modus !== 'einkauf') {
-      try { S.aktionen = aktionenNormalisiert(await S.api.aktionen()); } catch (e) { S.aktionen = []; console.error(e); }
+      try { S.aktionen = aktionenNormalisiert(await S.api.aktionen()); } catch (e) { S.aktionen = []; console.error(e); toast('Aktionen konnten nicht geladen werden: ' + (e && e.message || e)); }
       try { S.verlauf = await S.api.verlauf(); } catch (e) { S.verlauf = []; console.error(e); }
     }
     S.einkauf = einkaufAlt || await S.api.einkaufNeu().catch(async () => await S.api.offenerEinkauf());
@@ -1377,7 +1386,7 @@ async function startMitSitzung(session) {
 }
 
 /* Menü oben rechts */
-const APP_VERSION = '2026-11-17d';
+const APP_VERSION = '2026-11-18a';
 function menue() {
   const admin = S.profil && S.profil.rolle === 'admin';
   const ov = dialog(`<h2>Menü</h2>
