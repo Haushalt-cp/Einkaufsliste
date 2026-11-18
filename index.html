@@ -964,7 +964,12 @@ function renderAktionen(main) {
 
 // Migros bündelt Aktionen einer Marke («Blévita ganzes Sortiment»). Die Schnittstelle liefert keine Aktions-Nummer,
 // darum: gleiche Marke + gleicher Rabatt + gleiche Gültigkeit + gleiche Kategorie = eine Gruppe.
-const akGruppenSchluessel = x => x.laden === 'Migros' && x.marke
+// «Migros», «M-Classic» usw. sind Produktbezeichnungen, keine Sortiments-Aktionen: nicht bündeln.
+// Ebenso «Hit» (einzelner Preishit) und «20x · Neu» (Cumulus-Punkte auf Neuheiten).
+const NICHT_BUENDELN = new Set(['migros', 'm-classic', 'm-budget', 'migros bio']);
+const buendelbar = x => x.laden === 'Migros' && x.marke && !NICHT_BUENDELN.has(x.marke.trim().toLowerCase())
+  && !/^(hit\b|\d+x\b)/i.test((x.rabatt || '').trim());
+const akGruppenSchluessel = x => buendelbar(x)
   ? [x.laden, x.marke, x.rabatt || '', x.gueltig_von || '', x.gueltig_bis || '', x.kategorie || ''].join('|') : null;
 function aktionZeilen(items) {
   const gruppen = new Map();
