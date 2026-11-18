@@ -224,17 +224,33 @@ async function migrosDirekt(): Promise<Angebot[]> {
     if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
     return await r.json();
   };
-  // 1. Alle Aktions-Produkt-IDs der Region (laufend und kommend)
+  // 1. Alle Aktions-Produkt-IDs der Region: laufende und kommende Woche (Schnittstelle v2, period CURRENT/UPCOMING).
+  //    Die alte v1-Abfrage mit forceUpcomingPromotions liefert die kommende Woche nicht mehr.
   const ids = new Set<number>();
-  for (const kommend of [false, true]) {
-    for (let von = 0, total = 1; von < total && von < 4000; von += 100) {
-      const url = "https://www.migros.ch/product-display/public/web/v1/products/promotion/search" + (kommend ? "?forceUpcomingPromotions=true" : "");
-      const r = await post(url, { regionId: MIGROS_REGION, language: "de", from: von, limit: 100, sortFields: [], sortOrder: "asc", filters: {} });
-      total = Number(r.numberOfProducts) || 0;
-      for (const id of r.productIds || []) ids.add(Number(id));
-      if (!(r.productIds || []).length) break;
-    }
+  for (const period of ["CURRENT", "UPCOMING"]) {
+    try {
+      for (let von = 0; von < 4000; von += 100) {
+        const r = await post("https://www.migros.ch/product-display/public/web/v2/products/promotion/search",
+          { storeType: "OFFLINE", period, language: "de", filters: {}, sortFields: [], sortOrder: "asc", from: von, until: von + 100, region: MIGROS_REGION, warehouse: "1" });
+        const items = r.items || [];
+        for (const it of items) if (it?.id != null && (!it.type || it.type === "PRODUCT")) ids.add(Number(it.id));
+        if (!items.length || von + 100 >= (Number(r.numberOfItems) || 0)) break;
+      }
+    } catch (e) { console.error("Migros v2", period, e); }
   }
+  // Zusätzlich (und als Rückfall) die bisherige v1-Abfrage
+  for (const kommend of [false, true]) {
+    try {
+      for (let von = 0, total = 1; von < total && von < 4000; von += 100) {
+        const url = "https://www.migros.ch/product-display/public/web/v1/products/promotion/search" + (kommend ? "?forceUpcomingPromotions=true" : "");
+        const r = await post(url, { regionId: MIGROS_REGION, language: "de", from: von, limit: 100, sortFields: [], sortOrder: "asc", filters: {} });
+        total = Number(r.numberOfProducts) || 0;
+        for (const id of r.productIds || []) ids.add(Number(id));
+        if (!(r.productIds || []).length) break;
+      }
+    } catch (e) { console.error("Migros v1", e); }
+  }
+  if (!ids.size) throw new Error("Migros: keine Aktions-Produkte gefunden");
   // 2. Produktdetails mit dem Angebot, das am Einkaufstag gilt; sonst das aktuelle
   const tag = einkaufstag();
   const karten = async (liste: number[], datum?: string) => {
