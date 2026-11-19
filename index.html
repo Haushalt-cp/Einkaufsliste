@@ -153,7 +153,8 @@
   .akgruppe > .gr-varianten > .row:first-child { border-top: 1px solid var(--line); }
   .result { padding: 8px 12px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
   .result:first-child { border-top: 0; }
-  .result .main { flex: 1; }
+  .result { flex-wrap: wrap; }
+  .result .main { flex: 1 1 150px; min-width: 0; }
 </style>
 </head>
 <body>
@@ -558,7 +559,7 @@ function renderEinkaufen(main) {
     const ab = $('#hAbschliessen'); if (ab) ab.onclick = abschliessenDialog;
     $('#exportListe').onclick = () => kopiereText(textListe(liste));
     $('#abschliessen').onclick = abschliessenDialog;
-    $('#hinzu').onclick = hinzufuegenDialog;
+    $('#hinzu').onclick = () => hinzufuegenDialog();
     verdrahteVorschlaege(main, liste);
   } else {
     $('#erledigt').onclick = async () => {
@@ -774,6 +775,7 @@ function produktSuche(erg, roh, { neuZeichnen, leeren, schliessen, ohneFrueher }
 }
 
 function hinzufuegenDialog(start = '') {
+  if (typeof start !== 'string') start = '';
   const ov = dialog(`<h2>Zur Liste hinzufügen</h2>
     <input class="search" id="hSuche" placeholder="Artikel suchen oder neu eingeben …" autocomplete="off">
     <div id="hErg" class="card" style="margin-top:10px"></div>
@@ -1369,7 +1371,7 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
       catch (e) { fehler(e); }
     };
   };
-  setTimeout(() => (neu ? $('#fName', ov) : null)?.focus(), 50);
+  setTimeout(() => { if (!neu) return; const f = $('#fName', ov); f.focus(); f.setSelectionRange(f.value.length, f.value.length); }, 50);
 }
 
 function exportCsv() {
