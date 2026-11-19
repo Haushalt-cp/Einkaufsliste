@@ -758,7 +758,7 @@ function produktSuche(erg, roh, { neuZeichnen, leeren, schliessen, ohneFrueher }
   }
   if (q && !S.artikel.some(a => a.name.toLowerCase() === q)) {
     h += `<div class="result"><div class="main"><div class="name">«${esc(roh.trim())}»</div><div class="meta">${treffer.length ? 'etwas anderes, neu' : 'nicht gefunden, neu'}</div></div>
-      <button class="btn small" data-einmal>Nur diese Woche</button><button class="btn small primary" data-neuart>Als Artikel speichern</button></div>`;
+      <button class="btn small primary" data-neuart>+ Neu erfassen</button></div>`;
   }
   erg.innerHTML = h || '<div class="empty">Tippe einen Namen ein. Früher hinzugefügte Zusatzartikel erscheinen hier.</div>';
   erg.querySelectorAll('[data-art]').forEach(b => b.onclick = async () => {
@@ -770,8 +770,7 @@ function produktSuche(erg, roh, { neuZeichnen, leeren, schliessen, ohneFrueher }
     const f = frueher.find(x => x.freitext === b.dataset.frueher);
     zusatzDialog(f.freitext, f.kategorie, f.laden, neuZeichnen);
   });
-  const e1 = $('[data-einmal]', erg); if (e1) e1.onclick = () => zusatzDialog(roh.trim(), null, null, () => { if (leeren) leeren(); if (neuZeichnen) neuZeichnen(); });
-  const e2 = $('[data-neuart]', erg); if (e2) e2.onclick = () => { if (schliessen) schliessen(); if (leeren) leeren(); artikelDialog(null, { name: roh.trim(), liste: 'sonstige' }, null, true); };
+  const e2 = $('[data-neuart]', erg); if (e2) e2.onclick = () => { if (schliessen) schliessen(); if (leeren) leeren(); artikelDialog(null, { name: roh.trim(), liste: 'keine' }, null, true); };
 }
 
 function hinzufuegenDialog(start = '') {
@@ -1285,16 +1284,22 @@ function zuordnenDialog() {
 /* Artikel anlegen / bearbeiten – alle Felder, damit die Tabelle vollständig bleibt */
 function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
   const neu = !a; const v = Object.assign({ laeden: [], routine: null, nur_aktion: false, mindestbestand: 0, liste: 'vorrat' }, a || vorlage);
-  const ov = dialog(`<h2>${neu ? 'Neuer Artikel' : 'Artikel bearbeiten'}</h2>
+  // Von der Einkaufsliste aus: zusätzlich «Keine Liste – nur diese Woche» und Menge für diese Woche
+  const vonListe = neu && !ausPosition && aufListe;
+  const listenOpts = vonListe ? LISTEN.concat([['keine', 'Keine Liste']]) : LISTEN;
+  const gewaehlt = v.liste === 'keine' && vonListe ? 'keine' : listeVon(v);
+  const ov = dialog(`<h2>${neu ? (vonListe ? 'Neu auf die Einkaufsliste' : 'Neuer Artikel') : 'Artikel bearbeiten'}</h2>
     <form id="aForm" novalidate>
     <div class="field"><label for="fName">Name *</label><input type="text" id="fName" value="${esc(v.name || '')}" placeholder="z. B. M-Classic Thon"></div>
     <div class="field"><label for="fKat">Kategorie *</label>${katAuswahl('fKat', v.kategorie)}</div>
-    <div class="field"><div class="lbl">Erhältlich bei</div><div class="opts">${LAEDEN.map(l => `<label class="opt"><input type="checkbox" name="laeden" value="${esc(l)}" ${(v.laeden || []).includes(l) ? 'checked' : ''}>${esc(l)}</label>`).join('')}</div></div>
-    <div class="field"><label for="fStd">Standardladen *</label><select id="fStd"><option value="">– wählen –</option>${LAEDEN.map(l => `<option ${l === v.standardladen ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
-      <div class="hint">Dort landet der Artikel automatisch auf der Liste.</div></div>
-    <div class="field"><div class="lbl">Wo erscheint der Artikel?</div><div class="opts">
-      ${LISTEN.map(([k, t]) => `<label class="opt"><input type="radio" name="vorrat" value="${k}" ${listeVon(v) === k ? 'checked' : ''}>${k === 'vorrat' ? 'Vorrat (mit Bestand)' : t}</label>`).join('')}</div>
-      <div class="hint">«Häufig gekauft» und «Sonstige» erscheinen nicht im Vorrat, sind aber beim Zusammenstellen der Einkaufsliste über die Suche auffindbar.</div></div>
+    ${vonListe ? `<div class="field"><label for="fMenge">Menge diese Woche</label><input type="number" id="fMenge" min="1" step="1" inputmode="numeric" value="1"></div>` : ''}
+    <div class="field"><div class="lbl">Wo soll der Artikel gespeichert werden?</div><div class="opts" id="fListeOpts">
+      ${listenOpts.map(([k, t]) => `<label class="opt"><input type="radio" name="vorrat" value="${k}" ${gewaehlt === k ? 'checked' : ''}>${k === 'vorrat' ? 'Vorrat (mit Bestand)' : k === 'keine' ? 'Keine Liste (nur diese Woche)' : t}</label>`).join('')}</div>
+      <div class="hint">«Häufig gekauft» und «Sonstige» erscheinen nicht im Vorrat, sind aber beim Zusammenstellen der Einkaufsliste über die Suche auffindbar.${vonListe ? ' «Keine Liste»: nur diese Woche auf der Einkaufsliste, nächstes Mal unter «Früher hinzugefügt» wieder ankreuzbar.' : ''}</div></div>
+    <div class="field" id="fLaedenWrap"><div class="lbl">Erhältlich bei</div><div class="opts">${LAEDEN.map(l => `<label class="opt"><input type="checkbox" name="laeden" value="${esc(l)}" ${(v.laeden || []).includes(l) ? 'checked' : ''}>${esc(l)}</label>`).join('')}</div></div>
+    <div class="field"><label for="fStd" id="fStdLbl">Standardladen *</label><select id="fStd"><option value="">– wählen –</option>${LAEDEN.map(l => `<option ${l === v.standardladen ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+      <div class="hint" id="fStdHint">Dort landet der Artikel automatisch auf der Liste.</div></div>
+    <div id="fArtikelTeil">
     <div class="field"><div class="lbl">Nur in Aktion kaufen?</div><div class="opts">
       <label class="opt"><input type="radio" name="aktion" value="nein" ${!v.nur_aktion ? 'checked' : ''}>Nein</label>
       <label class="opt"><input type="radio" name="aktion" value="ja" ${v.nur_aktion ? 'checked' : ''}>Ja</label></div></div>
@@ -1307,7 +1312,8 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
       <div class="field"><label for="fMin">Mindestbestand</label><input type="number" id="fMin" min="0" step="any" inputmode="decimal" value="${fmt(v.mindestbestand).replace(',', '.')}"></div>
     </div>
     <div class="field"><label for="fBem">Bemerkung</label><input type="text" id="fBem" value="${esc(v.bemerkung || '')}"></div>
-    ${neu && !ausPosition ? `<label class="opt" style="margin-top:4px"><input type="checkbox" id="fAufListe" ${aufListe ? 'checked' : ''}>Auch gleich auf die Einkaufsliste dieser Woche</label>` : ''}
+    </div>
+    ${neu && !ausPosition && !vonListe ? `<label class="opt" style="margin-top:4px"><input type="checkbox" id="fAufListe" ${aufListe ? 'checked' : ''}>Auch gleich auf die Einkaufsliste dieser Woche</label>` : ''}
     <div class="err" id="fErr"></div>
     <div class="actions">
       ${!neu ? `<button type="button" class="btn danger" id="fDel">Löschen</button><span class="spacer"></span>` : ''}
@@ -1315,8 +1321,14 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
     </div></form>`);
   const rmWrap = $('#fRmWrap', ov);
   const sync = () => {
+    const lv = ov.querySelector('input[name=vorrat]:checked')?.value, keine = lv === 'keine';
     rmWrap.style.display = ov.querySelector('input[name=routine]:checked')?.value === 'ja' ? '' : 'none';
-    $('#fBestWrap', ov).style.display = ov.querySelector('input[name=vorrat]:checked')?.value === 'vorrat' ? '' : 'none';
+    $('#fBestWrap', ov).style.display = lv === 'vorrat' ? '' : 'none';
+    $('#fArtikelTeil', ov).style.display = keine ? 'none' : '';
+    $('#fLaedenWrap', ov).style.display = keine ? 'none' : '';
+    $('#fStdLbl', ov).textContent = keine ? 'Laden *' : 'Standardladen *';
+    $('#fStdHint', ov).textContent = keine ? 'Auf dieser Ladenliste erscheint der Artikel diese Woche.' : 'Dort landet der Artikel automatisch auf der Liste.';
+    $('#fOk', ov).textContent = !neu ? 'Speichern' : keine ? 'Auf die Liste' : vonListe ? 'Speichern & auf die Liste' : 'Artikel anlegen';
   };
   ov.querySelectorAll('input[name=routine], input[name=vorrat]').forEach(r => r.onchange = sync); sync();
   // Standardladen gilt automatisch als "erhältlich bei"
@@ -1326,6 +1338,22 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
     ev.preventDefault();
     const err = m => { $('#fErr', ov).textContent = m; };
     const name = $('#fName', ov).value.trim(), kategorie = $('#fKat', ov).value.trim(), standardladen = $('#fStd', ov).value;
+    const lv = ov.querySelector('input[name=vorrat]:checked')?.value;
+    const menge = vonListe ? toNum($('#fMenge', ov).value) : null;
+    if (vonListe && !(menge >= 1)) return err('Bitte eine Menge ab 1 angeben.');
+    if (lv === 'keine') {
+      // Nur diese Woche: kein Artikel, sondern Zusatzposition (wie bisher «Nur diese Woche»)
+      if (!name) return err('Bitte einen Namen eingeben.');
+      if (!kategorie) return err('Bitte eine Kategorie angeben.');
+      if (!standardladen) return err('Bitte einen Laden wählen.');
+      $('#fOk', ov).disabled = true;
+      try {
+        const p = await S.api.positionNeu({ einkauf_id: S.einkauf.id, freitext: name, kategorie, laden: standardladen, menge_fix: Math.max(1, Math.round(menge)) });
+        S.pos.push(p); S.frueher.unshift({ freitext: name, kategorie, laden: p.laden });
+        toast(`«${name}» auf der Liste.`); ov.remove(); render();
+      } catch (e) { $('#fOk', ov).disabled = false; err('Speichern fehlgeschlagen: ' + e.message); }
+      return;
+    }
     const routineV = ov.querySelector('input[name=routine]:checked')?.value;
     const laeden = [...ov.querySelectorAll('input[name=laeden]:checked')].map(c => c.value);
     const rm = toNum($('#fRm', ov).value), best = toNum($('#fBest', ov).value), min = toNum($('#fMin', ov).value);
@@ -1342,7 +1370,7 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
       nur_aktion: ov.querySelector('input[name=aktion]:checked').value === 'ja',
       routine: routineV === 'ja', routine_menge: routineV === 'ja' ? rm : null,
       bestand: best, mindestbestand: min, bemerkung: $('#fBem', ov).value.trim() || null,
-      ...listeSetzen(ov.querySelector('input[name=vorrat]:checked').value),
+      ...listeSetzen(lv),
     };
     $('#fOk', ov).disabled = true;
     try {
@@ -1350,10 +1378,10 @@ function artikelDialog(a, vorlage = {}, ausPosition = null, aufListe = false) {
         const n = await S.api.artikelNeu(obj); S.artikel.push(n);
         if (ausPosition) { await S.api.positionLoeschen(ausPosition.id); S.pos = S.pos.filter(p => p !== ausPosition); }
         S.aktionen.forEach(x => { delete x._match; });
-        if (ausPosition || $('#fAufListe', ov)?.checked) {
+        if (ausPosition || vonListe || $('#fAufListe', ov)?.checked) {
           const extra = ausPosition ? { in_aktion: !!ausPosition.in_aktion, aktion_id: ausPosition.aktion_id || null, bemerkung: ausPosition.bemerkung || null,
             laden: ausPosition.laden && ausPosition.laden !== n.standardladen ? ausPosition.laden : null } : {};
-          const p = await S.api.positionNeu(Object.assign({ einkauf_id: S.einkauf.id, artikel_id: n.id, aufnehmen: true, menge_fix: ausPosition ? ausPosition.menge_fix || 1 : Math.max(1, grund(n).menge) }, extra));
+          const p = await S.api.positionNeu(Object.assign({ einkauf_id: S.einkauf.id, artikel_id: n.id, aufnehmen: true, menge_fix: ausPosition ? ausPosition.menge_fix || 1 : vonListe ? Math.max(1, Math.round(menge)) : Math.max(1, grund(n).menge) }, extra));
           S.pos.push(p);
         }
         toast(`«${n.name}» angelegt.`);
