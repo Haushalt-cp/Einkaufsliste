@@ -1459,20 +1459,66 @@ async function laden() {
 }
 
 /* ---------- Anmeldung ---------- */
+const MAIL_OK = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function anmelden(meldung) {
+  const letzteMail = store.get('einkauf-letzte-mail') || '';
   $('#root').innerHTML = `<div class="setup"><img src="icon-192.png" alt="" onerror="this.remove()"><h1>Einkauf & Vorrat</h1>
-    <p>${esc(meldung || 'Melde dich mit deiner E-Mail-Adresse an. Du bekommst einen Link per Mail, ein Passwort brauchst du nicht.')}</p>
-    <form id="lForm" novalidate><input id="lMail" type="email" autocomplete="email" placeholder="deine@email.ch">
-    <div class="err" id="lErr"></div><button class="btn primary" id="lOk">Anmelde-Link senden</button></form></div>`;
+    <p>${esc(meldung || 'Melde dich mit E-Mail und Passwort an. Du bleibst danach auf diesem Gerät angemeldet.')}</p>
+    <form id="lForm" novalidate>
+      <input id="lMail" type="email" autocomplete="username" placeholder="deine@email.ch" value="${esc(letzteMail)}">
+      <input id="lPw" type="password" autocomplete="current-password" placeholder="Passwort">
+      <div class="err" id="lErr"></div><button class="btn primary" id="lOk">Anmelden</button></form>
+    <p style="margin-top:22px">Noch kein Passwort oder vergessen?</p>
+    <button class="btn" id="lLink">Anmelde-Link per Mail senden</button></div>`;
+  const mail = () => $('#lMail').value.trim();
   $('#lForm').onsubmit = async ev => {
     ev.preventDefault();
-    const email = $('#lMail').value.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return $('#lErr').textContent = 'Bitte eine gültige E-Mail-Adresse eingeben.';
-    $('#lOk').disabled = true;
+    const email = mail(), password = $('#lPw').value;
+    if (!MAIL_OK.test(email)) return $('#lErr').textContent = 'Bitte eine gültige E-Mail-Adresse eingeben.';
+    if (!password) return $('#lErr').textContent = 'Bitte das Passwort eingeben.';
+    $('#lOk').disabled = true; $('#lErr').textContent = '';
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) {
+      $('#lOk').disabled = false;
+      return $('#lErr').textContent = /invalid/i.test(error.message) ? 'E-Mail oder Passwort stimmt nicht. Noch kein Passwort? Dann unten den Anmelde-Link anfordern.'
+        : /rate|second/i.test(error.message) ? 'Zu viele Versuche. Bitte einige Minuten warten.' : 'Anmeldung fehlgeschlagen: ' + error.message;
+    }
+    store.set('einkauf-letzte-mail', email);
+    startMitSitzung(data.session);
+  };
+  $('#lLink').onclick = async () => {
+    const email = mail();
+    if (!MAIL_OK.test(email)) return $('#lErr').textContent = 'Bitte oben zuerst deine E-Mail-Adresse eingeben.';
+    $('#lLink').disabled = true;
     const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
-    if (error) { $('#lOk').disabled = false; return $('#lErr').textContent = /rate|second/i.test(error.message) ? 'Zu viele Versuche. Bitte einige Minuten warten.' : 'Senden fehlgeschlagen: ' + error.message; }
-    $('#root').innerHTML = `<div class="setup"><h1>Mail ist unterwegs</h1><p>Wir haben einen Anmelde-Link an <b>${esc(email)}</b> geschickt. Öffne ihn auf diesem Gerät. Schau auch im Spam-Ordner nach.</p>
+    if (error) { $('#lLink').disabled = false; return $('#lErr').textContent = /rate|second/i.test(error.message) ? 'Zu viele Versuche. Bitte einige Minuten warten.' : 'Senden fehlgeschlagen: ' + error.message; }
+    store.set('einkauf-letzte-mail', email);
+    $('#root').innerHTML = `<div class="setup"><h1>Mail ist unterwegs</h1><p>Wir haben einen Anmelde-Link an <b>${esc(email)}</b> geschickt. Schau auch im Spam-Ordner nach.</p>
+      <p>Nach dem Klick auf den Link legst du ein Passwort fest. Danach meldest du dich in der App mit E-Mail und Passwort an und bleibst angemeldet.</p>
       <button class="btn" onclick="location.reload()">Zurück</button></div>`;
+  };
+}
+
+/* Passwort festlegen (nach Anmeldung per Link oder über das Menü) */
+function passwortDialog(nachLink, weiter) {
+  const ov = dialog(`<h2>${nachLink ? 'Passwort festlegen' : 'Passwort ändern'}</h2>
+    <p class="sum">${nachLink ? 'Damit du nicht jedes Mal einen Link brauchst: Lege ein Passwort fest (mindestens 8 Zeichen). Danach meldest du dich in der App mit E-Mail und Passwort an und bleibst angemeldet.' : 'Mindestens 8 Zeichen.'}</p>
+    <input type="text" autocomplete="username" value="${esc(S.profil ? S.profil.email : '')}" style="display:none">
+    <input id="pw1" type="password" autocomplete="new-password" placeholder="Neues Passwort" style="width:100%;padding:12px;border:1.5px solid var(--line);border-radius:10px;margin-top:8px">
+    <input id="pw2" type="password" autocomplete="new-password" placeholder="Passwort wiederholen" style="width:100%;padding:12px;border:1.5px solid var(--line);border-radius:10px;margin-top:8px">
+    <div class="err" id="pwErr"></div>
+    <div class="actions"><button class="btn" id="pwSpaeter">${nachLink ? 'Später' : 'Abbrechen'}</button><button class="btn primary" id="pwOk">Speichern</button></div>`);
+  const zu = () => { ov.remove(); if (weiter) weiter(); };
+  $('#pwSpaeter', ov).onclick = zu;
+  $('#pwOk', ov).onclick = async () => {
+    const a = $('#pw1', ov).value, b = $('#pw2', ov).value;
+    if (a.length < 8) return $('#pwErr', ov).textContent = 'Bitte mindestens 8 Zeichen.';
+    if (a !== b) return $('#pwErr', ov).textContent = 'Die beiden Passwörter stimmen nicht überein.';
+    $('#pwOk', ov).disabled = true;
+    const { error } = await sb.auth.updateUser({ password: a, data: { pw_gesetzt: true } });
+    if (error) { $('#pwOk', ov).disabled = false; return $('#pwErr', ov).textContent = /weak|short|length/i.test(error.message) ? 'Passwort zu schwach. Bitte ein längeres wählen.' : 'Speichern fehlgeschlagen: ' + error.message; }
+    toast('Passwort gespeichert. Ab jetzt in der App mit E-Mail und Passwort anmelden.');
+    zu();
   };
 }
 
@@ -1486,7 +1532,7 @@ function wartet(profil) {
 
 async function abmelden() { if (sb) await sb.auth.signOut(); location.reload(); }
 
-async function startMitSitzung(session) {
+async function startMitSitzung(session, perLink) {
   S.api = restApi(async () => { const { data } = await sb.auth.getSession(); return data.session ? data.session.access_token : session.access_token; });
   try {
     const profil = await S.api.meinProfil(session.user.id);
@@ -1494,6 +1540,9 @@ async function startMitSitzung(session) {
     S.profil = profil;
     if (profil.rolle === 'wartend') return wartet(profil);
     S.modus = profil.rolle === 'einkauf' ? 'einkauf' : 'admin';
+    if (session.user && session.user.email) store.set('einkauf-letzte-mail', session.user.email);
+    const pwFehlt = !(session.user && session.user.user_metadata && session.user.user_metadata.pw_gesetzt);
+    if (perLink && pwFehlt) { $('#root').innerHTML = ''; return passwortDialog(true, laden); }
     laden();
   } catch (e) {
     $('#root').innerHTML = `<div class="setup"><h1>Keine Verbindung</h1><p>${esc(e.message)}</p><button class="btn primary" onclick="location.reload()">Nochmals versuchen</button></div>`;
@@ -1501,18 +1550,20 @@ async function startMitSitzung(session) {
 }
 
 /* Menü oben rechts */
-const APP_VERSION = '2026-11-18a';
+const APP_VERSION = '2026-11-19a';
 function menue() {
   const admin = S.profil && S.profil.rolle === 'admin';
   const ov = dialog(`<h2>Menü</h2>
     <p class="sum">Angemeldet als ${esc(S.profil ? S.profil.email : '')} (${esc(S.profil ? S.profil.rolle : '')})</p>
     <div class="opts" style="flex-direction:column;align-items:stretch">
       ${admin ? `<button class="btn" id="mBenutzer">Benutzer verwalten</button>` : ''}
+      <button class="btn" id="mPasswort">Passwort ändern</button>
       <button class="btn" id="mAbmelden">Abmelden</button>
     </div><p class="sum" style="margin-top:10px">App-Version ${APP_VERSION}</p><div class="actions"><button class="btn" data-close>Schliessen</button></div>`);
   if (admin) {
     $('#mBenutzer', ov).onclick = () => { ov.remove(); benutzerDialog(); };
   }
+  $('#mPasswort', ov).onclick = () => { ov.remove(); passwortDialog(false); };
   $('#mAbmelden', ov).onclick = abmelden;
 }
 
@@ -1553,11 +1604,12 @@ async function benutzerDialog() {
     return anmelden(hp.get('error_code') === 'otp_expired' ? 'Der Anmelde-Link ist abgelaufen oder wurde schon benutzt. Bitte einen neuen anfordern.' : 'Anmeldung fehlgeschlagen. Bitte nochmals versuchen.');
   }
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { flowType: 'implicit', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  const perLink = location.hash.includes('access_token');
   const { data } = await sb.auth.getSession();
-  if (location.hash.includes('access_token')) history.replaceState(null, '', location.pathname);
-  if (data.session) return startMitSitzung(data.session);
+  if (perLink) history.replaceState(null, '', location.pathname);
+  if (data.session) return startMitSitzung(data.session, perLink);
   let gestartet = false;
-  sb.auth.onAuthStateChange((ev, session) => { if (ev === 'SIGNED_IN' && session && !gestartet) { gestartet = true; startMitSitzung(session); } });
+  sb.auth.onAuthStateChange((ev, session) => { if (ev === 'SIGNED_IN' && session && !gestartet) { gestartet = true; startMitSitzung(session, true); } });
   anmelden();
 })();
 </script>
